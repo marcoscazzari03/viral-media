@@ -26,7 +26,7 @@ KOKORO_VOICES = os.environ.get("KOKORO_VOICES", "/opt/kokoro/voices-v1.0.bin")
 KOKORO_VOICE = os.environ.get("KOKORO_VOICE", "am_michael")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/srv/media"))
 # Hosts whose videos are fetched with yt-dlp (only the requested section is downloaded)
-SOURCE_HOSTS = [h.strip() for h in os.environ.get("SOURCE_HOSTS", "youtube.com,youtu.be").split(",") if h.strip()]
+SOURCE_HOSTS = [h.strip() for h in os.environ.get("SOURCE_HOSTS", "youtube.com,youtu.be,twitch.tv,kick.com").split(",") if h.strip()]
 MAX_CLIP_SECONDS = float(os.environ.get("MAX_CLIP_SECONDS", "75"))
 
 _whisper = None
