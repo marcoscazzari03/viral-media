@@ -47,9 +47,26 @@ Use `audio_url` instead of `voiceover` to supply your own audio.
 The worker only downloads plain http(s) URLs. **Rights are decided upstream** (`rights_status` in n8n):
 only pass media you are allowed to use.
 
+### `render` clip mode
+
+Pass `clip` instead of `visuals`/`voiceover`: only the requested section is downloaded (yt-dlp for
+YouTube URLs), fitted vertically over a blurred background, optionally preceded by a voiced intro.
+
+```json
+{
+  "clip": { "url": "https://www.youtube.com/watch?v=VIDEO_ID", "start": 42.1, "end": 69.3 },
+  "intro": { "text": "Kai Cenat thought this was a good idea...", "voice": "am_adam", "speed": 1.05 },
+  "hook": "He really thought this was a good idea",
+  "credit": "via @KaiCenat on YouTube",
+  "watermark": "@yourpage"
+}
+```
+
+Clips are capped at `MAX_CLIP_SECONDS` (default 75).
+
 ### `transcribe` params
 
-`{ "media_url": "https://.../file.mp4", "language": "en" }` → `segments`, `text`, `transcript_url`.
+`{ "source_url": "https://www.youtube.com/watch?v=..." }` (audio only via yt-dlp) or `{ "media_url": "https://.../file.mp4" }` → `segments`, `text`, `transcript_url`.
 
 ### `tts` params
 
@@ -70,7 +87,7 @@ and ports 80/443 open, so Caddy can obtain the HTTPS certificate.
 ## Update
 
 ```bash
-cd /opt/viral-media && git pull && cd media-worker && docker compose up -d --build
+bash /opt/viral-media/media-worker/scripts/update.sh
 ```
 
 ## Operations

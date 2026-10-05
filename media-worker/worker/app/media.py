@@ -25,6 +25,9 @@ KOKORO_MODEL = os.environ.get("KOKORO_MODEL", "/opt/kokoro/kokoro-v1.0.int8.onnx
 KOKORO_VOICES = os.environ.get("KOKORO_VOICES", "/opt/kokoro/voices-v1.0.bin")
 KOKORO_VOICE = os.environ.get("KOKORO_VOICE", "am_michael")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/srv/media"))
+# Hosts whose videos are fetched with yt-dlp (only the requested section is downloaded)
+SOURCE_HOSTS = [h.strip() for h in os.environ.get("SOURCE_HOSTS", "youtube.com,youtu.be").split(",") if h.strip()]
+MAX_CLIP_SECONDS = float(os.environ.get("MAX_CLIP_SECONDS", "75"))
 
 _whisper = None
 _whisper_lock = threading.Lock()
@@ -62,6 +65,45 @@ def download(url: str, dest: Path) -> Path:
                     raise ValueError(f"download larger than {MAX_DOWNLOAD_BYTES // 1048576} MB: {url}")
                 f.write(chunk)
     return dest
+
+
+def is_platform_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in SOURCE_HOSTS)
+
+
+def fetch_audio(url: str, job_dir: Path) -> Path:
+    """Audio track of a platform video (yt-dlp) or of a plain media URL, as 16 kHz mono wav."""
+    wav = job_dir / "audio.wav"
+    if is_platform_url(url):
+        run(["yt-dlp", "--no-playlist", "--no-progress", "-f", "ba[ext=m4a]/ba/b",
+             "--max-filesize", f"{MAX_DOWNLOAD_BYTES // 1048576}M", "-o", str(job_dir / "source.%(ext)s"), url])
+        src = next(job_dir.glob("source.*"))
+    else:
+        src = download(url, job_dir / "source")
+    run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
+    src.unlink(missing_ok=True)
+    return wav
+
+
+def fetch_section(url: str, start: float, end: float, out: Path) -> Path:
+    """Only the [start, end] section of a video, with audio (mp4)."""
+    if end <= start:
+        raise ValueError("clip end must be greater than start")
+    if is_platform_url(url):
+        tmp = out.with_name("section_src")
+        run(["yt-dlp", "--no-playlist", "--no-progress",
+             "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080]/b",
+             "--download-sections", f"*{start:.2f}-{end:.2f}", "--force-keyframes-at-cuts",
+             "--merge-output-format", "mp4", "-o", str(tmp) + ".%(ext)s", url])
+        src = next(out.parent.glob("section_src.*"))
+        src.rename(out)
+        return out
+    src = download(url, out.with_name("section_full"))
+    run(["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", str(src),
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-b:a", "192k", str(out)])
+    src.unlink(missing_ok=True)
+    return out
 
 
 def get_whisper():
@@ -126,16 +168,14 @@ def process_tts(job_dir: Path, params: dict, job_id: str) -> dict:
 
 # ---------------------------------------------------------------- transcription
 def process_transcribe(job_dir: Path, params: dict, job_id: str) -> dict:
-    url = params.get("media_url")
+    # source_url: platform page (yt-dlp, audio only) | media_url: plain file URL
+    url = params.get("source_url") or params.get("media_url")
     if not url:
-        raise ValueError("media_url is required")
-    src = download(url, job_dir / "source")
-    audio = job_dir / "audio.wav"
-    run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", str(audio)])
+        raise ValueError("source_url or media_url is required")
+    audio = fetch_audio(url, job_dir)
     segs, words, duration = whisper_words(audio, params.get("language", "en"))
     payload = {"duration": duration, "segments": segs, "words": words}
     (job_dir / "transcript.json").write_text(json.dumps(payload, ensure_ascii=False))
-    src.unlink(missing_ok=True)
     audio.unlink(missing_ok=True)
     return {"transcript_url": public_url(job_id, "transcript.json"), "duration": duration,
             "segments": segs, "text": " ".join(s["text"] for s in segs)}
@@ -154,7 +194,7 @@ def ass_escape(text: str) -> str:
 
 
 def build_ass(words: list[dict], hook: str, hook_seconds: float, watermark: str, duration: float,
-              words_per_caption: int = 3) -> str:
+              words_per_caption: int = 3, credit: str = "") -> str:
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {W}
@@ -167,6 +207,7 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: Caption,DejaVu Sans,82,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,7,2,2,80,80,560,1
 Style: Hook,DejaVu Sans,70,&H00FFFFFF,&H00FFFFFF,&H00000000,&HB0000000,-1,0,0,0,100,100,0,0,3,18,0,8,70,70,240,1
 Style: Watermark,DejaVu Sans,40,&H60FFFFFF,&H60FFFFFF,&H80000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,2,40,40,140,1
+Style: Credit,DejaVu Sans,36,&H30FFFFFF,&H30FFFFFF,&H80000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,40,40,520,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -184,6 +225,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             lines.append(f"Dialogue: 1,{ass_time(start)},{ass_time(min(end, duration))},Caption,,0,0,0,,{text}")
     if watermark:
         lines.append(f"Dialogue: 0,{ass_time(0)},{ass_time(duration)},Watermark,,0,0,0,,{ass_escape(watermark)}")
+    if credit:
+        lines.append(f"Dialogue: 0,{ass_time(0)},{ass_time(duration)},Credit,,0,0,0,,{ass_escape(credit)}")
     return header + "\n".join(lines) + "\n"
 
 
@@ -233,6 +276,8 @@ def plan_durations(visuals: list[dict], total: float) -> list[float]:
 
 
 def process_render(job_dir: Path, params: dict, job_id: str) -> dict:
+    if params.get("clip"):
+        return render_clip(job_dir, params, job_id)
     max_duration = float(params.get("max_duration", 90))
     visuals = params.get("visuals") or [{"type": "color", "color": "#111111"}]
 
@@ -267,13 +312,15 @@ def process_render(job_dir: Path, params: dict, job_id: str) -> dict:
          "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
          "-r", str(FPS), "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-t", f"{duration:.3f}",
          "-movflags", "+faststart", "reel.mp4"], cwd=job_dir)
+    return finish(job_dir, job_id, duration, len(words), keep=("voice.wav",))
+
+
+def finish(job_dir: Path, job_id: str, duration: float, captions: int, keep: tuple = (), extra: dict | None = None) -> dict:
     run(["ffmpeg", "-y", "-v", "error", "-ss", f"{min(1.0, duration / 2):.2f}", "-i", "reel.mp4", "-frames:v", "1",
          "-q:v", "3", "cover.jpg"], cwd=job_dir)
-
     for p in job_dir.iterdir():  # keep only deliverables
-        if p.name not in ("reel.mp4", "cover.jpg", "subs.ass", "voice.wav"):
+        if p.name not in ("reel.mp4", "cover.jpg", "subs.ass", *keep):
             p.unlink(missing_ok=True)
-
     reel = job_dir / "reel.mp4"
     return {
         "video_url": public_url(job_id, "reel.mp4"),
@@ -282,8 +329,82 @@ def process_render(job_dir: Path, params: dict, job_id: str) -> dict:
         "width": W,
         "height": H,
         "size_bytes": reel.stat().st_size,
-        "captions": len(words),
+        "captions": captions,
+        **(extra or {}),
     }
+
+
+# ---------------------------------------------------------------- render: clip mode
+# Source video fitted in the 9:16 frame over a blurred copy of itself (no faces cropped out).
+FIT_BLUR = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:2,setsar=1[bg];"
+            f"[0:v]scale={W}:-2,setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,fps={FPS},format=yuv420p[v]")
+AUDIO_OUT = ["-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"]
+
+
+def has_audio(path: Path) -> bool:
+    out = run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0",
+               str(path)])
+    return bool(out.strip())
+
+
+def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
+    clip = params["clip"]
+    url = clip.get("url")
+    if not url:
+        raise ValueError("clip.url is required")
+    start = float(clip.get("start", 0))
+    end = min(float(clip["end"]), start + MAX_CLIP_SECONDS)
+    fetch_section(url, start, end, job_dir / "clip_src.mp4")
+
+    # 1. normalise the clip: 1080x1920 blur layout, 30 fps, AAC 48 kHz stereo (silent track if none)
+    audio_in = ["-map", "0:a:0"] if has_audio(job_dir / "clip_src.mp4") else ["-map", "1:a"]
+    run(["ffmpeg", "-y", "-v", "error", "-i", "clip_src.mp4", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+         "-filter_complex", FIT_BLUR, "-map", "[v]", *audio_in, "-shortest",
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", *AUDIO_OUT, "clip.mp4"], cwd=job_dir)
+
+    # 2. optional intro: our voiceover over the darkened first frame (adds context + originality)
+    parts = []
+    intro = params.get("intro") or {}
+    intro_seconds = 0.0
+    if intro.get("text"):
+        synth(intro["text"], job_dir / "intro_voice.wav", float(intro.get("speed", 1.0)), intro.get("voice"),
+              intro.get("engine"))
+        intro_seconds = probe_duration(job_dir / "intro_voice.wav") + 0.25
+        run(["ffmpeg", "-y", "-v", "error", "-i", "clip.mp4", "-frames:v", "1", "first.png"], cwd=job_dir)
+        run(["ffmpeg", "-y", "-v", "error", "-loop", "1", "-i", "first.png", "-i", "intro_voice.wav",
+             "-vf", f"eq=brightness=-0.18:saturation=0.8,fps={FPS},format=yuv420p", "-af", "apad",
+             "-t", f"{intro_seconds:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", *AUDIO_OUT,
+             "intro.mp4"], cwd=job_dir)
+        parts.append("intro.mp4")
+    parts.append("clip.mp4")
+
+    if len(parts) == 1:
+        (job_dir / "clip.mp4").rename(job_dir / "base.mp4")
+    else:
+        inputs = sum((["-i", p] for p in parts), [])
+        streams = "".join(f"[{i}:v][{i}:a]" for i in range(len(parts)))
+        run(["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex",
+             f"{streams}concat=n={len(parts)}:v=1:a=1[v][a]", "-map", "[v]", "-map", "[a]",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", *AUDIO_OUT, "base.mp4"], cwd=job_dir)
+    duration = probe_duration(job_dir / "base.mp4")
+
+    # 3. captions from the final audio (intro voice + original speech)
+    words = []
+    if params.get("captions", True):
+        run(["ffmpeg", "-y", "-v", "error", "-i", "base.mp4", "-vn", "-ac", "1", "-ar", "16000", "speech.wav"],
+            cwd=job_dir)
+        _, words, _ = whisper_words(job_dir / "speech.wav", "en")
+    hook_seconds = float(params.get("hook_seconds") or max(intro_seconds, 3))
+    (job_dir / "subs.ass").write_text(build_ass(
+        words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), duration,
+        int(params.get("words_per_caption", 3)), params.get("credit", "")))
+
+    # 4. burn subtitles, keep audio
+    run(["ffmpeg", "-y", "-v", "error", "-i", "base.mp4", "-vf", "ass=subs.ass", "-c:v", "libx264",
+         "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(FPS), *AUDIO_OUT,
+         "-movflags", "+faststart", "reel.mp4"], cwd=job_dir)
+    return finish(job_dir, job_id, duration, len(words),
+                  extra={"clip_start": start, "clip_end": end, "intro_seconds": round(intro_seconds, 2)})
 
 
 PROCESSORS = {"tts": process_tts, "transcribe": process_transcribe, "render": process_render}

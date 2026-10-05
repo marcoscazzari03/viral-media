@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIPER_VOICE=/opt/piper/en_US-lessac-medium.onnx
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core curl ca-certificates \
+ && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core curl ca-certificates unzip \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -27,6 +27,14 @@ RUN mkdir -p /opt/kokoro \
     https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx \
  && curl -fsSL -o /opt/kokoro/voices-v1.0.bin \
     https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+
+# Deno: JavaScript runtime required by yt-dlp for YouTube
+RUN curl -fsSL -o /tmp/deno.zip https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip \
+ && unzip -q /tmp/deno.zip -d /usr/local/bin && rm /tmp/deno.zip && deno --version
+
+# yt-dlp changes often: scripts/update.sh passes a new YTDLP_REFRESH value to always get the latest release
+ARG YTDLP_REFRESH=0
+RUN pip install --no-cache-dir -U "yt-dlp[default]" && yt-dlp --version
 
 COPY app ./app
 
