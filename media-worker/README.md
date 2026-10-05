@@ -69,7 +69,7 @@ the watermark takes its place; the Reel ends with a short fade.
 ```
 
 Optional: `fg_scale` (default 1.3), `duck` (default 0.22), `words_per_caption` (default 3), `captions`
-(default true). Clips are capped at `MAX_CLIP_SECONDS` (default 75).
+(default true; `"intro_only"` captions just our voice-over, for clips with burned-in subtitles). Clips are capped at `MAX_CLIP_SECONDS` (default 75).
 
 ### `transcribe` params
 

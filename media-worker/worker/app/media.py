@@ -434,12 +434,14 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     fade = min(0.4, duration / 10)
     duck = float(params.get("duck", 0.22))
 
-    # 2. captions: our voice (clean track) + original speech once the voice is over
+    # 2. captions: our voice (clean track) + original speech once the voice is over.
+    #    captions="intro_only" for clips that already carry the streamer's own burned-in subtitles.
     words = []
-    if params.get("captions", True):
+    captions = params.get("captions", True)
+    if captions:
         if voice_s:
             _, words, _ = whisper_words(job_dir / "intro_voice.wav", "en")
-        if audio_ok:
+        if audio_ok and captions != "intro_only":
             run(["ffmpeg", "-y", "-v", "error", "-i", "clip_src.mp4", "-vn", "-ac", "1", "-ar", "16000",
                  "orig16k.wav"], cwd=job_dir)
             _, orig_words, _ = whisper_words(job_dir / "orig16k.wav", "en")
