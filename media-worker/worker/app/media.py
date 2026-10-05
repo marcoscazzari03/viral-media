@@ -335,16 +335,80 @@ def finish(job_dir: Path, job_id: str, duration: float, captions: int, keep: tup
 
 
 # ---------------------------------------------------------------- render: clip mode
-# Source video fitted in the 9:16 frame over a blurred copy of itself (no faces cropped out).
-FIT_BLUR = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:2,setsar=1[bg];"
-            f"[0:v]scale={W}:-2,setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,fps={FPS},format=yuv420p[v]")
+# Reel layout (1080x1920):
+#   y ~200-470  hook for the first seconds, then the page watermark
+#   y ~505      small source credit
+#   centre      the clip, wider than the frame (sides cropped) over a blurred copy of itself,
+#               slow zoom-in + an optional punch zoom on the key moment
+#   y ~1500     big captions, current word highlighted
+# Our voice-over plays over the first seconds of the moving clip (original audio ducked under it):
+# no frozen intro frame, the clip is in motion from frame one.
 AUDIO_OUT = ["-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"]
+HIGHLIGHT = "&H0000E6FF&"  # ASS colours are BGR: yellow #FFE600
+
+CLIP_ASS_STYLES = """Style: Caption,DejaVu Sans,96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,8,3,2,70,70,420,1
+Style: Hook,DejaVu Sans,92,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,22,0,8,60,60,210,1
+Style: Watermark,DejaVu Sans,46,&H50FFFFFF,&H50FFFFFF,&H90000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,0,8,40,40,330,1
+Style: Credit,DejaVu Sans,34,&H40FFFFFF,&H40FFFFFF,&H90000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,40,40,505,1"""
 
 
 def has_audio(path: Path) -> bool:
     out = run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0",
                str(path)])
     return bool(out.strip())
+
+
+def video_size(path: Path) -> tuple[int, int]:
+    out = run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+               "-of", "json", str(path)])
+    s = json.loads(out)["streams"][0]
+    return int(s["width"]), int(s["height"])
+
+
+def even(x: float) -> int:
+    return max(2, int(round(x / 2)) * 2)
+
+
+def build_clip_ass(words: list[dict], hook: str, hook_seconds: float, watermark: str, credit: str,
+                   duration: float, words_per_caption: int = 3) -> str:
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {W}
+PlayResY: {H}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+{CLIP_ASS_STYLES}
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    lines = []
+    hook_end = min(hook_seconds, duration)
+    if hook:
+        wrapped = "\\N".join(textwrap.wrap(ass_escape(hook).upper(), width=18))
+        lines.append(f"Dialogue: 3,{ass_time(0)},{ass_time(hook_end)},Hook,,0,0,0,,{{\\fad(0,250)}}{wrapped}")
+    # captions: groups of N words; one event per word so the word being spoken is highlighted
+    for i in range(0, len(words), words_per_caption):
+        chunk = words[i:i + words_per_caption]
+        group_end = words[i + words_per_caption]["start"] if i + words_per_caption < len(words) else chunk[-1]["end"] + 0.3
+        group_end = min(group_end, duration)
+        texts = [ass_escape(w["word"]).upper() for w in chunk]
+        for j, w in enumerate(chunk):
+            start = chunk[0]["start"] if j == 0 else w["start"]
+            end = chunk[j + 1]["start"] if j + 1 < len(chunk) else group_end
+            if end <= start:
+                continue
+            shown = " ".join(f"{{\\c{HIGHLIGHT}}}{t}{{\\c&H00FFFFFF&}}" if k == j else t for k, t in enumerate(texts))
+            lines.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Caption,,0,0,0,,{shown}")
+    if watermark:  # takes the hook's place once the hook is gone
+        lines.append(f"Dialogue: 1,{ass_time(hook_end if hook else 0)},{ass_time(duration)},Watermark,,0,0,0,,"
+                     f"{{\\fad(250,0)}}{ass_escape(watermark)}")
+    if credit:
+        lines.append(f"Dialogue: 1,{ass_time(0)},{ass_time(duration)},Credit,,0,0,0,,{ass_escape(credit)}")
+    return header + "\n".join(lines) + "\n"
 
 
 def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
@@ -354,57 +418,81 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
         raise ValueError("clip.url is required")
     start = float(clip.get("start", 0))
     end = min(float(clip["end"]), start + MAX_CLIP_SECONDS)
-    fetch_section(url, start, end, job_dir / "clip_src.mp4")
+    src = fetch_section(url, start, end, job_dir / "clip_src.mp4")
+    src_dur = probe_duration(src)
+    sw, sh = video_size(src)
+    audio_ok = has_audio(src)
 
-    # 1. normalise the clip: 1080x1920 blur layout, 30 fps, AAC 48 kHz stereo (silent track if none)
-    audio_in = ["-map", "0:a:0"] if has_audio(job_dir / "clip_src.mp4") else ["-map", "1:a"]
-    run(["ffmpeg", "-y", "-v", "error", "-i", "clip_src.mp4", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
-         "-filter_complex", FIT_BLUR, "-map", "[v]", *audio_in, "-shortest",
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", *AUDIO_OUT, "clip.mp4"], cwd=job_dir)
-
-    # 2. optional intro: our voiceover over the darkened first frame (adds context + originality)
-    parts = []
+    # 1. our voice-over (optional), played over the first seconds of the moving clip
     intro = params.get("intro") or {}
-    intro_seconds = 0.0
+    voice_s = 0.0
     if intro.get("text"):
         synth(intro["text"], job_dir / "intro_voice.wav", float(intro.get("speed", 1.0)), intro.get("voice"),
               intro.get("engine"))
-        intro_seconds = probe_duration(job_dir / "intro_voice.wav") + 0.25
-        run(["ffmpeg", "-y", "-v", "error", "-i", "clip.mp4", "-frames:v", "1", "first.png"], cwd=job_dir)
-        run(["ffmpeg", "-y", "-v", "error", "-loop", "1", "-i", "first.png", "-i", "intro_voice.wav",
-             "-vf", f"eq=brightness=-0.18:saturation=0.8,fps={FPS},format=yuv420p", "-af", "apad",
-             "-t", f"{intro_seconds:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", *AUDIO_OUT,
-             "intro.mp4"], cwd=job_dir)
-        parts.append("intro.mp4")
-    parts.append("clip.mp4")
+        voice_s = probe_duration(job_dir / "intro_voice.wav")
+    duration = round(max(src_dur, voice_s + 0.6), 3)
+    fade = min(0.4, duration / 10)
+    duck = float(params.get("duck", 0.22))
 
-    if len(parts) == 1:
-        (job_dir / "clip.mp4").rename(job_dir / "base.mp4")
-    else:
-        inputs = sum((["-i", p] for p in parts), [])
-        streams = "".join(f"[{i}:v][{i}:a]" for i in range(len(parts)))
-        run(["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex",
-             f"{streams}concat=n={len(parts)}:v=1:a=1[v][a]", "-map", "[v]", "-map", "[a]",
-             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", *AUDIO_OUT, "base.mp4"], cwd=job_dir)
-    duration = probe_duration(job_dir / "base.mp4")
-
-    # 3. captions from the final audio (intro voice + original speech)
+    # 2. captions: our voice (clean track) + original speech once the voice is over
     words = []
     if params.get("captions", True):
-        run(["ffmpeg", "-y", "-v", "error", "-i", "base.mp4", "-vn", "-ac", "1", "-ar", "16000", "speech.wav"],
-            cwd=job_dir)
-        _, words, _ = whisper_words(job_dir / "speech.wav", "en")
-    hook_seconds = float(params.get("hook_seconds") or max(intro_seconds, 3))
-    (job_dir / "subs.ass").write_text(build_ass(
-        words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), duration,
-        int(params.get("words_per_caption", 3)), params.get("credit", "")))
+        if voice_s:
+            _, words, _ = whisper_words(job_dir / "intro_voice.wav", "en")
+        if audio_ok:
+            run(["ffmpeg", "-y", "-v", "error", "-i", "clip_src.mp4", "-vn", "-ac", "1", "-ar", "16000",
+                 "orig16k.wav"], cwd=job_dir)
+            _, orig_words, _ = whisper_words(job_dir / "orig16k.wav", "en")
+            words += [w for w in orig_words if w["start"] >= voice_s - 0.1]
+    hook_seconds = float(params.get("hook_seconds") or 2.5)
+    (job_dir / "subs.ass").write_text(build_clip_ass(
+        words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), params.get("credit", ""),
+        duration, int(params.get("words_per_caption", 3))))
 
-    # 4. burn subtitles, keep audio
-    run(["ffmpeg", "-y", "-v", "error", "-i", "base.mp4", "-vf", "ass=subs.ass", "-c:v", "libx264",
-         "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(FPS), *AUDIO_OUT,
-         "-movflags", "+faststart", "reel.mp4"], cwd=job_dir)
+    # 3. video: blurred background + enlarged foreground with slow zoom and optional punch zoom
+    fg_scale = min(max(float(params.get("fg_scale", 1.3)), 1.0), 1.8)
+    if sh >= sw:  # vertical source: fill the frame
+        fg_w, fg_h = W, H
+        prep = f"scale={2 * W}:{2 * H}:force_original_aspect_ratio=increase,crop={2 * W}:{2 * H}"
+    else:
+        fg_h = min(even(W * fg_scale * sh / sw), H)
+        fg_w = W
+        prep = f"scale={even(2 * W * fg_scale)}:{2 * fg_h},crop={2 * W}:{2 * fg_h}"
+    t = f"(on/{FPS})"
+    zoom = f"1+0.06*{t}/{duration:.3f}"
+    emph = params.get("emphasis_at")
+    if emph is not None and 0.3 <= float(emph) <= duration - 0.3:
+        zoom += f"+0.14*exp(-pow(({t}-{float(emph):.2f})/0.25,2))"
+    pad = max(duration - src_dur, 0)
+    vf = (f"[0:v]fps={FPS},setsar=1,split=2[a][b];"
+          f"[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:2,setsar=1[bg];"
+          f"[b]{prep},zoompan=z='{zoom}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={fg_w}x{fg_h}:fps={FPS},setsar=1[fg];"
+          f"[bg][fg]overlay=(W-w)/2:(H-h)/2,tpad=stop_mode=clone:stop_duration={pad:.3f},"
+          f"ass=subs.ass,fade=t=out:st={duration - fade:.3f}:d={fade:.3f},format=yuv420p[v]")
+
+    # 4. audio: original ducked under the voice-over, then back to full volume; fade out at the end
+    inputs = ["-i", "clip_src.mp4"]
+    if audio_ok:
+        orig = "[0:a]aresample=48000,aformat=channel_layouts=stereo"
+    else:
+        inputs += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
+        orig = "[1:a]anull"
+    if voice_s:
+        vi = len(inputs) // 2
+        inputs += ["-i", "intro_voice.wav"]
+        af = (f"{orig},volume='{duck}+(1-{duck})*min(max((t-{voice_s:.2f})/0.4,0),1)':eval=frame,apad[o];"
+              f"[{vi}:a]aresample=48000,aformat=channel_layouts=stereo,volume=1.5[vo];"
+              f"[o][vo]amix=inputs=2:duration=first:normalize=0,")
+    else:
+        af = f"{orig},apad,"
+    af += f"atrim=0:{duration:.3f},afade=t=out:st={duration - fade:.3f}:d={fade:.3f}[aout]"
+
+    run(["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", f"{vf};{af}", "-map", "[v]", "-map", "[aout]",
+         "-t", f"{duration:.3f}", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-r", str(FPS),
+         *AUDIO_OUT, "-movflags", "+faststart", "reel.mp4"], cwd=job_dir)
     return finish(job_dir, job_id, duration, len(words),
-                  extra={"clip_start": start, "clip_end": end, "intro_seconds": round(intro_seconds, 2)})
+                  extra={"clip_start": start, "clip_end": end, "intro_seconds": round(voice_s, 2),
+                         "emphasis_at": emph})
 
 
 PROCESSORS = {"tts": process_tts, "transcribe": process_transcribe, "render": process_render}

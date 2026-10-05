@@ -50,19 +50,26 @@ only pass media you are allowed to use.
 ### `render` clip mode
 
 Pass `clip` instead of `visuals`/`voiceover`: only the requested section is downloaded (yt-dlp for
-YouTube URLs), fitted vertically over a blurred background, optionally preceded by a voiced intro.
+platform URLs). The clip is enlarged (`fg_scale`, sides cropped) over a blurred copy of itself, with a
+slow zoom-in and an optional punch zoom at `emphasis_at` (seconds from the segment start). The `intro`
+voice-over plays over the first seconds of the moving clip while the original audio is ducked (`duck`).
+Captions are big word groups with the spoken word highlighted; the hook shows for `hook_seconds`, then
+the watermark takes its place; the Reel ends with a short fade.
 
 ```json
 {
-  "clip": { "url": "https://www.youtube.com/watch?v=VIDEO_ID", "start": 42.1, "end": 69.3 },
+  "clip": { "url": "https://www.twitch.tv/kaicenat/clip/CLIP_ID", "start": 0, "end": 24.5 },
   "intro": { "text": "Kai Cenat thought this was a good idea...", "voice": "am_adam", "speed": 1.05 },
-  "hook": "He really thought this was a good idea",
-  "credit": "via @KaiCenat on YouTube",
+  "hook": "He really thought this would work",
+  "hook_seconds": 2.5,
+  "emphasis_at": 14.2,
+  "credit": "twitch.tv/kaicenat",
   "watermark": "@yourpage"
 }
 ```
 
-Clips are capped at `MAX_CLIP_SECONDS` (default 75).
+Optional: `fg_scale` (default 1.3), `duck` (default 0.22), `words_per_caption` (default 3), `captions`
+(default true). Clips are capped at `MAX_CLIP_SECONDS` (default 75).
 
 ### `transcribe` params
 
