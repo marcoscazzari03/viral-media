@@ -1,4 +1,4 @@
-"""Media processors: TTS (Piper), transcription (faster-whisper), Reel rendering (FFmpeg).
+"""Media processors: TTS (Kokoro, Piper fallback), transcription (faster-whisper), Reel rendering (FFmpeg).
 
 Each processor receives (job_dir, params, job_id) and returns a JSON-serialisable result.
 Inputs are only fetched from plain http(s) URLs: the worker never scrapes platforms.
@@ -20,10 +20,16 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 MAX_DOWNLOAD_BYTES = int(float(os.environ.get("MAX_DOWNLOAD_MB", "500")) * 1024 * 1024)
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small.en")
 PIPER_VOICE = os.environ.get("PIPER_VOICE", "/opt/piper/en_US-lessac-medium.onnx")
+TTS_ENGINE = os.environ.get("TTS_ENGINE", "kokoro")
+KOKORO_MODEL = os.environ.get("KOKORO_MODEL", "/opt/kokoro/kokoro-v1.0.int8.onnx")
+KOKORO_VOICES = os.environ.get("KOKORO_VOICES", "/opt/kokoro/voices-v1.0.bin")
+KOKORO_VOICE = os.environ.get("KOKORO_VOICE", "am_michael")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/srv/media"))
 
 _whisper = None
 _whisper_lock = threading.Lock()
+_kokoro = None
+_kokoro_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------- helpers
@@ -80,20 +86,41 @@ def whisper_words(audio: Path, language: str | None = "en") -> tuple[list[dict],
 
 
 # ---------------------------------------------------------------- TTS
-def synth(text: str, out: Path, speed: float = 1.0) -> Path:
+def get_kokoro():
+    global _kokoro
+    with _kokoro_lock:
+        if _kokoro is None:
+            from kokoro_onnx import Kokoro
+
+            _kokoro = Kokoro(KOKORO_MODEL, KOKORO_VOICES)
+        return _kokoro
+
+
+def synth(text: str, out: Path, speed: float = 1.0, voice: str | None = None, engine: str | None = None) -> Path:
     text = " ".join(text.split())
     if not text:
         raise ValueError("voiceover text is empty")
     if len(text) > 3000:
         raise ValueError("voiceover text longer than 3000 characters")
-    # Piper: length_scale < 1 = faster speech
-    run(["piper", "--model", PIPER_VOICE, "--output_file", str(out), "--length_scale", f"{1 / max(speed, 0.5):.3f}"],
-        stdin=text)
+    engine = engine or TTS_ENGINE
+    if engine == "kokoro":
+        import soundfile as sf
+
+        samples, rate = get_kokoro().create(text, voice=voice or KOKORO_VOICE, speed=min(max(speed, 0.5), 2.0),
+                                            lang="en-us")
+        sf.write(str(out), samples, rate)
+    elif engine == "piper":
+        # Piper: length_scale < 1 = faster speech
+        run(["piper", "--model", PIPER_VOICE, "--output_file", str(out),
+             "--length_scale", f"{1 / max(speed, 0.5):.3f}"], stdin=text)
+    else:
+        raise ValueError(f"unknown tts engine: {engine}")
     return out
 
 
 def process_tts(job_dir: Path, params: dict, job_id: str) -> dict:
-    out = synth(params.get("text", ""), job_dir / "voice.wav", float(params.get("speed", 1.0)))
+    out = synth(params.get("text", ""), job_dir / "voice.wav", float(params.get("speed", 1.0)),
+                params.get("voice"), params.get("engine"))
     return {"audio_url": public_url(job_id, out.name), "duration": round(probe_duration(out), 2)}
 
 
@@ -213,7 +240,7 @@ def process_render(job_dir: Path, params: dict, job_id: str) -> dict:
     vo = params.get("voiceover") or {}
     voice = job_dir / "voice.wav"
     if vo.get("text"):
-        synth(vo["text"], voice, float(vo.get("speed", 1.0)))
+        synth(vo["text"], voice, float(vo.get("speed", 1.0)), vo.get("voice"), vo.get("engine"))
     elif params.get("audio_url"):
         raw = download(params["audio_url"], job_dir / "audio_src")
         run(["ffmpeg", "-y", "-v", "error", "-i", str(raw), "-ac", "1", "-ar", "48000", str(voice)])

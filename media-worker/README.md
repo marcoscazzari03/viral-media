@@ -3,7 +3,7 @@
 Self-hosted media service for the Reel Factory (n8n Cloud cannot run FFmpeg/Whisper).
 
 - **FastAPI** job API with bearer token
-- **Piper** local TTS (English voice `en_US-lessac-medium`)
+- **Kokoro** local TTS (default, natural US voices, e.g. `am_michael`), **Piper** as fallback
 - **faster-whisper** local transcription with word timestamps (model `small.en`, CPU int8)
 - **FFmpeg** 1080x1920 Reel rendering: visuals (image / video / color) + voiceover + burned captions + hook + watermark
 - **Caddy** automatic HTTPS, serves finished files publicly (needed by the Instagram API)
@@ -26,7 +26,7 @@ All endpoints except `/health` need `Authorization: Bearer <API_TOKEN>`.
 
 ```json
 {
-  "voiceover": { "text": "Kai Cenat really thought this was a good idea...", "speed": 1.05 },
+  "voiceover": { "text": "Kai Cenat really thought this was a good idea...", "voice": "am_michael", "speed": 1.05 },
   "hook": "Kai Cenat immediately regretted this",
   "hook_seconds": 3,
   "watermark": "@yourpage",
