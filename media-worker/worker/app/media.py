@@ -453,11 +453,11 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     fg_scale = min(max(float(params.get("fg_scale", 1.3)), 1.0), 1.8)
     if sh >= sw:  # vertical source: fill the frame
         fg_w, fg_h = W, H
-        prep = f"scale={2 * W}:{2 * H}:force_original_aspect_ratio=increase,crop={2 * W}:{2 * H}"
+        prep = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
     else:
         fg_h = min(even(W * fg_scale * sh / sw), H)
         fg_w = W
-        prep = f"scale={even(2 * W * fg_scale)}:{2 * fg_h},crop={2 * W}:{2 * fg_h}"
+        prep = f"scale={even(W * fg_scale)}:{fg_h},crop={W}:{fg_h}"
     t = f"(on/{FPS})"
     zoom = f"1+0.06*{t}/{duration:.3f}"
     emph = params.get("emphasis_at")
@@ -465,7 +465,9 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
         zoom += f"+0.14*exp(-pow(({t}-{float(emph):.2f})/0.25,2))"
     pad = max(duration - src_dur, 0)
     vf = (f"[0:v]fps={FPS},setsar=1,split=2[a][b];"
-          f"[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:2,setsar=1[bg];"
+          # background blurred at 1/4 size then upscaled: same look, a fraction of the CPU
+          f"[a]scale={W // 4}:{H // 4}:force_original_aspect_ratio=increase,crop={W // 4}:{H // 4},boxblur=10:1,"
+          f"scale={W}:{H},setsar=1[bg];"
           f"[b]{prep},zoompan=z='{zoom}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={fg_w}x{fg_h}:fps={FPS},setsar=1[fg];"
           f"[bg][fg]overlay=(W-w)/2:(H-h)/2,tpad=stop_mode=clone:stop_duration={pad:.3f},"
           f"ass=subs.ass,fade=t=out:st={duration - fade:.3f}:d={fade:.3f},format=yuv420p[v]")
@@ -488,7 +490,8 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     af += f"atrim=0:{duration:.3f},afade=t=out:st={duration - fade:.3f}:d={fade:.3f}[aout]"
 
     run(["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", f"{vf};{af}", "-map", "[v]", "-map", "[aout]",
-         "-t", f"{duration:.3f}", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-r", str(FPS),
+         "-t", f"{duration:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-r", str(FPS),
+         "-threads", "0",
          *AUDIO_OUT, "-movflags", "+faststart", "reel.mp4"], cwd=job_dir)
     return finish(job_dir, job_id, duration, len(words),
                   extra={"clip_start": start, "clip_end": end, "intro_seconds": round(voice_s, 2),
