@@ -1,0 +1,14 @@
+{$DOMAIN} {
+	encode gzip
+
+	# Rendered files (public, needed by the Instagram API): https://DOMAIN/files/<job_id>/reel.mp4
+	handle_path /files/* {
+		root * /srv/media/files
+		file_server
+	}
+
+	# Job API (protected by bearer token inside the app)
+	handle {
+		reverse_proxy worker:8000
+	}
+}

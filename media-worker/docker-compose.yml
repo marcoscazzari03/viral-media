@@ -1,0 +1,34 @@
+# US VIRAL media worker: FastAPI job API (FFmpeg + faster-whisper + Piper TTS) behind Caddy (automatic HTTPS).
+services:
+  worker:
+    build: ./worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PUBLIC_BASE_URL: https://${DOMAIN}
+      DATA_DIR: /srv/media
+    volumes:
+      - media_data:/srv/media
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - worker
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - media_data:/srv/media:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  media_data:
+  caddy_data:
+  caddy_config:
