@@ -86,24 +86,40 @@ def fetch_audio(url: str, job_dir: Path) -> Path:
     return wav
 
 
+def is_short_clip_url(url: str) -> bool:
+    """Twitch / Kick clips: short files, downloaded whole and cut locally."""
+    u = urlparse(url)
+    host = (u.hostname or "").lower()
+    return host == "clips.twitch.tv" or ("twitch.tv" in host and "/clip/" in u.path) or ("kick.com" in host and "clip" in u.path)
+
+
+def cut(src: Path, start: float, end: float, out: Path) -> Path:
+    """Frame-accurate cut with re-encode (no glitches from cutting between keyframes)."""
+    run(["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", str(src),
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-c:a", "aac", "-b:a", "192k", str(out)])
+    src.unlink(missing_ok=True)
+    return out
+
+
 def fetch_section(url: str, start: float, end: float, out: Path) -> Path:
     """Only the [start, end] section of a video, with audio (mp4)."""
     if end <= start:
         raise ValueError("clip end must be greater than start")
     if is_platform_url(url):
+        fmt = "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080]/b"
         tmp = out.with_name("section_src")
-        run(["yt-dlp", "--no-playlist", "--no-progress",
-             "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080]/b",
+        if is_short_clip_url(url):
+            # whole clip, then our own accurate cut: section downloads of clip files can glitch mid-video
+            run(["yt-dlp", "--no-playlist", "--no-progress", "-f", fmt, "--merge-output-format", "mp4",
+                 "--max-filesize", f"{MAX_DOWNLOAD_BYTES // 1048576}M", "-o", str(tmp) + ".%(ext)s", url])
+            return cut(next(out.parent.glob("section_src.*")), start, end, out)
+        run(["yt-dlp", "--no-playlist", "--no-progress", "-f", fmt,
              "--download-sections", f"*{start:.2f}-{end:.2f}", "--force-keyframes-at-cuts",
              "--merge-output-format", "mp4", "-o", str(tmp) + ".%(ext)s", url])
         src = next(out.parent.glob("section_src.*"))
         src.rename(out)
         return out
-    src = download(url, out.with_name("section_full"))
-    run(["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", str(src),
-         "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-b:a", "192k", str(out)])
-    src.unlink(missing_ok=True)
-    return out
+    return cut(download(url, out.with_name("section_full")), start, end, out)
 
 
 def get_whisper():
@@ -431,6 +447,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return header + "\n".join(lines) + "\n"
 
 
+def script_words(text: str, timed: list[dict], duration: float) -> list[dict]:
+    """Captions for our own voice-over: the words of the script we wrote (whisper may misspell names),
+    timed with whisper's word timings when the counts match, else spread evenly over the voice."""
+    words = text.split()
+    if not words:
+        return []
+    if len(timed) == len(words):
+        return [{"start": t["start"], "end": t["end"], "word": w, "src": "voice"} for w, t in zip(words, timed)]
+    t0 = timed[0]["start"] if timed else 0.0
+    t1 = timed[-1]["end"] if timed else duration
+    step = max(t1 - t0, 0.1) / len(words)
+    return [{"start": round(t0 + i * step, 2), "end": round(t0 + (i + 1) * step, 2), "word": w, "src": "voice"}
+            for i, w in enumerate(words)]
+
+
 def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     clip = params["clip"]
     url = clip.get("url")
@@ -460,8 +491,8 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     captions = params.get("captions", True)
     if captions:
         if voice_s:
-            _, words, _ = whisper_words(job_dir / "intro_voice.wav", "en")
-            words = [{**w, "src": "voice"} for w in words]
+            _, timed, _ = whisper_words(job_dir / "intro_voice.wav", "en")
+            words = script_words(intro["text"], timed, voice_s)
         if audio_ok and captions != "intro_only":
             run(["ffmpeg", "-y", "-v", "error", "-i", "clip_src.mp4", "-vn", "-ac", "1", "-ar", "16000",
                  "orig16k.wav"], cwd=job_dir)
