@@ -346,10 +346,24 @@ def finish(job_dir: Path, job_id: str, duration: float, captions: int, keep: tup
 AUDIO_OUT = ["-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"]
 HIGHLIGHT = "&H0000E6FF&"  # ASS colours are BGR: yellow #FFE600
 
-CLIP_ASS_STYLES = """Style: Caption,DejaVu Sans,96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,8,3,2,70,70,420,1
-Style: Hook,DejaVu Sans,92,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,22,0,8,60,60,210,1
-Style: Watermark,DejaVu Sans,46,&H50FFFFFF,&H50FFFFFF,&H90000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,0,8,40,40,330,1
-Style: Credit,DejaVu Sans,34,&H40FFFFFF,&H40FFFFFF,&H90000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,40,40,505,1"""
+# Style line template: margins come from the layout (where the clip sits in the frame)
+CLIP_ASS_STYLES = """Style: Caption,DejaVu Sans,96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,8,3,2,70,70,{caption_v},1
+Style: Hook,DejaVu Sans,92,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,22,0,8,60,60,{hook_v},1
+Style: Watermark,DejaVu Sans,46,&H50FFFFFF,&H50FFFFFF,&H90000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,0,8,40,40,{watermark_v},1
+Style: Credit,DejaVu Sans,34,&H40FFFFFF,&H40FFFFFF,&H90000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,40,40,{credit_v},1"""
+
+
+def clip_layout(fg_h: int) -> dict:
+    """ASS vertical margins around the clip: texts sit above it, captions straddle its bottom edge
+    (kept above Instagram's caption/buttons area, the bottom ~20% of the screen)."""
+    top = (H - fg_h) // 2
+    bottom = top + fg_h
+    return {
+        "hook_v": max(top - 340, 100),
+        "watermark_v": max(top - 110, 230),
+        "credit_v": max(top - 48, 290),
+        "caption_v": max(H - bottom - 60, 390),
+    }
 
 
 def has_audio(path: Path) -> bool:
@@ -370,7 +384,7 @@ def even(x: float) -> int:
 
 
 def build_clip_ass(words: list[dict], hook: str, hook_seconds: float, watermark: str, credit: str,
-                   duration: float, words_per_caption: int = 3) -> str:
+                   duration: float, layout: dict, words_per_caption: int = 3) -> str:
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {W}
@@ -380,7 +394,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-{CLIP_ASS_STYLES}
+{CLIP_ASS_STYLES.format(**layout)}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -390,10 +404,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     if hook:
         wrapped = "\\N".join(textwrap.wrap(ass_escape(hook).upper(), width=18))
         lines.append(f"Dialogue: 3,{ass_time(0)},{ass_time(hook_end)},Hook,,0,0,0,,{{\\fad(0,250)}}{wrapped}")
-    # captions: groups of N words; one event per word so the word being spoken is highlighted
-    for i in range(0, len(words), words_per_caption):
-        chunk = words[i:i + words_per_caption]
-        group_end = words[i + words_per_caption]["start"] if i + words_per_caption < len(words) else chunk[-1]["end"] + 0.3
+    # captions: groups of N words, never mixing our voice-over with the clip's speech (word "src");
+    # one event per word so the word being spoken is highlighted
+    groups = []
+    for w in words:
+        if groups and len(groups[-1]) < words_per_caption and groups[-1][-1].get("src") == w.get("src"):
+            groups[-1].append(w)
+        else:
+            groups.append([w])
+    for g, chunk in enumerate(groups):
+        group_end = groups[g + 1][0]["start"] if g + 1 < len(groups) else chunk[-1]["end"] + 0.3
         group_end = min(group_end, duration)
         texts = [ass_escape(w["word"]).upper() for w in chunk]
         for j, w in enumerate(chunk):
@@ -441,18 +461,14 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     if captions:
         if voice_s:
             _, words, _ = whisper_words(job_dir / "intro_voice.wav", "en")
+            words = [{**w, "src": "voice"} for w in words]
         if audio_ok and captions != "intro_only":
             run(["ffmpeg", "-y", "-v", "error", "-i", "clip_src.mp4", "-vn", "-ac", "1", "-ar", "16000",
                  "orig16k.wav"], cwd=job_dir)
             _, orig_words, _ = whisper_words(job_dir / "orig16k.wav", "en")
-            words += [w for w in orig_words if w["start"] >= voice_s - 0.1]
-    hook_seconds = float(params.get("hook_seconds") or 2.5)
-    (job_dir / "subs.ass").write_text(build_clip_ass(
-        words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), params.get("credit", ""),
-        duration, int(params.get("words_per_caption", 3))))
-
+            words += [{**w, "src": "clip"} for w in orig_words if w["start"] >= voice_s - 0.1]
     # 3. video: blurred background + enlarged foreground with slow zoom and optional punch zoom
-    fg_scale = min(max(float(params.get("fg_scale", 1.3)), 1.0), 1.8)
+    fg_scale = min(max(float(params.get("fg_scale", 1.7)), 1.0), 2.0)
     if sh >= sw:  # vertical source: fill the frame
         fg_w, fg_h = W, H
         prep = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
@@ -460,11 +476,16 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
         fg_h = min(even(W * fg_scale * sh / sw), H)
         fg_w = W
         prep = f"scale={even(W * fg_scale)}:{fg_h},crop={W}:{fg_h}"
+    hook_seconds = float(params.get("hook_seconds") or 2.5)
+    (job_dir / "subs.ass").write_text(build_clip_ass(
+        words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), params.get("credit", ""),
+        duration, clip_layout(fg_h), int(params.get("words_per_caption", 3))))
+
     t = f"(on/{FPS})"
     zoom = f"1+0.06*{t}/{duration:.3f}"
     emph = params.get("emphasis_at")
     if emph is not None and 0.3 <= float(emph) <= duration - 0.3:
-        zoom += f"+0.14*exp(-pow(({t}-{float(emph):.2f})/0.25,2))"
+        zoom += f"+0.22*exp(-pow(({t}-{float(emph):.2f})/0.45,2))"
     pad = max(duration - src_dur, 0)
     vf = (f"[0:v]fps={FPS},setsar=1,split=2[a][b];"
           # background blurred at 1/4 size then upscaled: same look, a fraction of the CPU
@@ -489,7 +510,9 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
               f"[o][vo]amix=inputs=2:duration=first:normalize=0,")
     else:
         af = f"{orig},apad,"
-    af += f"atrim=0:{duration:.3f},afade=t=out:st={duration - fade:.3f}:d={fade:.3f}[aout]"
+    # loudness normalised to the usual short-video level, true peak capped (no clipping)
+    af += (f"atrim=0:{duration:.3f},loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,"
+           f"afade=t=out:st={duration - fade:.3f}:d={fade:.3f}[aout]")
 
     run(["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", f"{vf};{af}", "-map", "[v]", "-map", "[aout]",
          "-t", f"{duration:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-r", str(FPS),
