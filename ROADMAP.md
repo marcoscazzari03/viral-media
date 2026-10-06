@@ -18,8 +18,8 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
   nome dello streamer, @handle; tutto dentro l'area 3:4 visibile nella griglia del profilo.
 - [ ] Dopo 1-2 settimane: confrontare le varianti (`memepop+voice` / `memepop+novoice`, e i vecchi `meme+...`)
   con 04 Analytics e fissare la percentuale di voce.
-- [ ] Varianti da testare dopo: video a schermo pieno (lati tagliati) e "facecam sopra" per gli streamer con
-  facecam fissa. Più avanti: nome del gioco nella copertina ("ASMONGOLD x WOW").
+- [x] Layout "webcam sopra, gioco sotto" automatico quando nella clip c'è una webcam (6 ottobre).
+- [ ] Varianti da testare dopo: video a schermo pieno (lati tagliati). Più avanti: nome del gioco nella copertina ("ASMONGOLD x WOW").
 
 ## Dopo 1-2 giorni di pubblicazioni senza errori
 - [ ] Fonte Kick (Adin Ross, xQc e altri): parte di ricerca nel Discovery (il worker scarica già le clip Kick).

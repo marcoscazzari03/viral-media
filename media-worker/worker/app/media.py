@@ -379,10 +379,10 @@ Style: PopCredit,DejaVu Sans,30,&H40FFFFFF,&H40FFFFFF,&H90000000,&H00000000,0,0,
 Style: Draw,DejaVu Sans,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1"""
 
 
-def clip_layout(fg_h: int) -> dict:
+def clip_layout(fg_h: int, top: int | None = None) -> dict:
     """ASS vertical margins around the clip: texts sit above it, captions straddle its bottom edge
     (kept above Instagram's caption/buttons area, the bottom ~20% of the screen)."""
-    top = (H - fg_h) // 2
+    top = (H - fg_h) // 2 if top is None else top
     bottom = top + fg_h
     return {
         "hook_v": max(top - 340, 100),
@@ -603,6 +603,76 @@ def script_words(text: str, timed: list[dict], duration: float) -> list[dict]:
             for i, w in enumerate(words)]
 
 
+# ---------------------------------------------------------------- facecam split layout
+# Gaming / reaction clips with the streamer's webcam in a corner: the normal layout crops the sides and cuts it.
+# Split layout instead: texts on top, the webcam enlarged in a panel, the gameplay below (yellow line between).
+CAM_TOP, CAM_H, GAME_H = 440, 560, 740
+
+
+def detect_facecam(job_dir: Path, src: Path, sw: int, sh: int, duration: float) -> dict | None:
+    """Crop box (source pixels) of the streamer's webcam overlay, or None. A webcam is the same small face found
+    in most sampled frames; a big face means a full-screen camera (IRL / just chatting): normal layout.
+    The box is then trimmed to the overlay's own borders, which stay sharp in the average of the frames
+    while the moving gameplay around them blurs out."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    grays, frames = [], []
+    for i, f in enumerate((0.1, 0.25, 0.4, 0.55, 0.7, 0.85)):
+        shot = job_dir / f"facecam_{i}.jpg"
+        run(["ffmpeg", "-y", "-v", "error", "-ss", f"{duration * f:.2f}", "-i", str(src), "-frames:v", "1",
+             "-vf", "scale=960:-2", str(shot)])
+        img = cv2.imread(str(shot), cv2.IMREAD_GRAYSCALE)
+        shot.unlink(missing_ok=True)
+        if img is None:
+            continue
+        size = int(img.shape[1] * 0.035)
+        # minNeighbors 10: strict, so game characters and crowds are not taken for the streamer
+        faces = cascade.detectMultiScale(img, scaleFactor=1.1, minNeighbors=10, minSize=(size, size))
+        grays.append(img)
+        frames.append([tuple(map(float, f)) for f in faces])
+    if len(frames) < 3:
+        return None
+
+    def near(a: tuple, b: tuple) -> bool:
+        return abs(a[0] + a[2] / 2 - b[0] - b[2] / 2) < a[2] * 0.6 and abs(a[1] + a[3] / 2 - b[1] - b[3] / 2) < a[3] * 0.6
+
+    best = None
+    for face in (f for fr in frames for f in fr):
+        same = [next(g for g in fr if near(face, g)) for fr in frames if any(near(face, g) for g in fr)]
+        if len(same) >= max(3, len(frames) // 2 + 1) and (best is None or len(same) > len(best)):
+            best = same
+    if not best:
+        return None
+    fx, fy, fw, fh = (sorted(v)[len(v) // 2] for v in zip(*best))  # median box: steady against jitter
+    gh, gw = grays[0].shape
+    if not gw * 0.04 <= fw <= gw * 0.22:  # too small = blurry when enlarged, too big = full-screen camera
+        return None
+
+    # generous box around the face, then cut at the first straight border line on each side
+    cw, ch = min(fw * 3.4, gw), min(fw * 3.4 * CAM_H / W * 1.3, gh)
+    x0 = int(min(max(fx + fw / 2 - cw / 2, 0), gw - cw))
+    y0 = int(min(max(fy + fh * 0.55 - ch / 2, 0), gh - ch))
+    x1, y1 = int(x0 + cw), int(y0 + ch)
+    mean = np.mean(np.stack(grays), axis=0).astype(np.uint8)
+    edge_y = np.abs(cv2.Sobel(mean, cv2.CV_32F, 0, 1, ksize=3)) > 60
+    edge_x = np.abs(cv2.Sobel(mean, cv2.CV_32F, 1, 0, ksize=3)) > 60
+    fb, ft, fr_, fl = int(fy + fh * 0.85), int(fy - fh * 0.15), int(fx + fw * 1.15), int(fx - fw * 0.15)
+    for _ in range(2):  # sides first (rows measured on the trimmed width), then again with the trimmed height
+        line_col = lambda c: edge_x[y0:y1, c].mean() > 0.5  # noqa: E731 - a border spans the whole box
+        x1 = next((c for c in range(max(fr_, x0), x1) if line_col(c)), x1)
+        x0 = next((c for c in range(min(fl, x1 - 1), x0, -1) if line_col(c)), x0)
+        line_row = lambda r: edge_y[r, x0:x1].mean() > 0.5  # noqa: E731
+        y1 = next((r for r in range(max(fb, y0), y1) if line_row(r)), y1)
+        y0 = next((r for r in range(min(ft, y1 - 1), y0, -1) if line_row(r)), y0)
+    k = sw / gw
+    return {"x": int(x0 * k), "y": int(y0 * k), "w": even((x1 - x0) * k), "h": even((y1 - y0) * k),
+            "face_cx": (fx + fw / 2) * k}
+
+
 def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     clip = params["clip"]
     url = clip.get("url")
@@ -648,10 +718,15 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
         fg_h = min(even(W * fg_scale * sh / sw), H)
         fg_w = W
         prep = f"scale={even(W * fg_scale)}:{fg_h},crop={W}:{fg_h}"
+    # layout "auto" (default): split when a webcam overlay is found in a landscape clip, else the normal one
+    cam = None
+    if params.get("layout", "auto") in ("auto", "split") and sw > sh:
+        cam = detect_facecam(job_dir, src, sw, sh, src_dur)
+    layout = clip_layout(GAME_H + CAM_H, CAM_TOP) if cam else clip_layout(fg_h)
     hook_seconds = float(params.get("hook_seconds") or 2.5)
     (job_dir / "subs.ass").write_text(build_clip_ass(
         words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), params.get("credit", ""),
-        duration, clip_layout(fg_h), int(params.get("words_per_caption", 3)), params.get("top_text", ""),
+        duration, layout, int(params.get("words_per_caption", 3)), params.get("top_text", ""),
         params.get("top_accent", ""), params.get("top_style", "pop")))
 
     t = f"(on/{FPS})"
@@ -660,13 +735,27 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     if emph is not None and 0.3 <= float(emph) <= duration - 0.3:
         zoom += f"+0.22*exp(-pow(({t}-{float(emph):.2f})/0.45,2))"
     pad = max(duration - src_dur, 0)
-    vf = (f"[0:v]fps={FPS},setsar=1,split=2[a][b];"
-          # background blurred at 1/4 size then upscaled: same look, a fraction of the CPU
-          f"[a]scale={W // 4}:{H // 4}:force_original_aspect_ratio=increase,crop={W // 4}:{H // 4},boxblur=10:1,"
-          f"scale={W}:{H},setsar=1[bg];"
-          f"[b]{prep},zoompan=z='{zoom}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={fg_w}x{fg_h}:fps={FPS},setsar=1[fg];"
-          f"[bg][fg]overlay=(W-w)/2:(H-h)/2,tpad=stop_mode=clone:stop_duration={pad:.3f},"
-          f"ass=subs.ass,fade=t=out:st={duration - fade:.3f}:d={fade:.3f},format=yuv420p[v]")
+    # background blurred at 1/4 size then upscaled: same look, a fraction of the CPU
+    bg = (f"[a]scale={W // 4}:{H // 4}:force_original_aspect_ratio=increase,crop={W // 4}:{H // 4},boxblur=10:1,"
+          f"scale={W}:{H},setsar=1[bg];")
+    end_chain = (f"tpad=stop_mode=clone:stop_duration={pad:.3f},"
+                 f"ass=subs.ass,fade=t=out:st={duration - fade:.3f}:d={fade:.3f},format=yuv420p[v]")
+    if cam:
+        # gameplay: fit the panel height, crop the width away from the webcam side (so it is not shown twice)
+        gw = even(sw * GAME_H / sh)
+        gx = 0 if cam["face_cx"] > sw / 2 else max(gw - W, 0)
+        gy = CAM_TOP + CAM_H
+        vf = (f"[0:v]fps={FPS},setsar=1,split=3[a][b][c];" + bg +
+              f"[b]crop={cam['w']}:{cam['h']}:{cam['x']}:{cam['y']},"
+              f"scale={W}:{CAM_H}:force_original_aspect_ratio=increase,crop={W}:{CAM_H},setsar=1[cam];"
+              f"[c]scale={gw}:{GAME_H},crop={W}:{GAME_H}:{gx}:0,zoompan=z='{zoom}':d=1:x='iw/2-(iw/zoom/2)':"
+              f"y='ih/2-(ih/zoom/2)':s={W}x{GAME_H}:fps={FPS},setsar=1[game];"
+              f"[bg][cam]overlay=0:{CAM_TOP}[t];[t][game]overlay=0:{gy},"
+              f"drawbox=x=0:y={gy - 3}:w={W}:h=6:color=0xFFD221@1:t=fill," + end_chain)
+    else:
+        vf = (f"[0:v]fps={FPS},setsar=1,split=2[a][b];" + bg +
+              f"[b]{prep},zoompan=z='{zoom}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={fg_w}x{fg_h}:fps={FPS},setsar=1[fg];"
+              f"[bg][fg]overlay=(W-w)/2:(H-h)/2," + end_chain)
 
     # 4. audio: original ducked under the voice-over, then back to full volume; fade out at the end
     inputs = ["-i", "clip_src.mp4"]
@@ -700,6 +789,7 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
             (job_dir / "cover.jpg").unlink(missing_ok=True)
     return finish(job_dir, job_id, duration, len(words),
                   extra={"clip_start": start, "clip_end": end, "intro_seconds": round(voice_s, 2),
+                         "layout": "split" if cam else "center",
                          "emphasis_at": emph})
 
 
