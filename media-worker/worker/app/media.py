@@ -619,7 +619,9 @@ def detect_facecam(job_dir: Path, src: Path, sw: int, sh: int, duration: float) 
         import numpy as np
     except ImportError:
         return None
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    # frontal (alt2) + profile (both directions): streamers turn to the monitor, lean in, move around
+    frontal = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml")
+    profile = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
     grays, frames = [], []
     for i, f in enumerate((0.1, 0.25, 0.4, 0.55, 0.7, 0.85)):
         shot = job_dir / f"facecam_{i}.jpg"
@@ -629,33 +631,37 @@ def detect_facecam(job_dir: Path, src: Path, sw: int, sh: int, duration: float) 
         shot.unlink(missing_ok=True)
         if img is None:
             continue
-        size = int(img.shape[1] * 0.035)
-        # minNeighbors 10: strict, so game characters and crowds are not taken for the streamer
-        faces = cascade.detectMultiScale(img, scaleFactor=1.1, minNeighbors=10, minSize=(size, size))
+        size, iw = int(img.shape[1] * 0.035), img.shape[1]
+        found = [tuple(map(float, f)) for f in frontal.detectMultiScale(img, 1.1, 6, minSize=(size, size))]
+        found += [tuple(map(float, f)) for f in profile.detectMultiScale(img, 1.1, 6, minSize=(size, size))]
+        found += [(iw - x - w, y, w, h) for x, y, w, h in
+                  (map(float, f) for f in profile.detectMultiScale(cv2.flip(img, 1), 1.1, 6, minSize=(size, size)))]
         grays.append(img)
-        frames.append([tuple(map(float, f)) for f in faces])
+        frames.append(found)
     if len(frames) < 3:
         return None
 
+    radius = grays[0].shape[1] * 0.12 if grays else 0  # the streamer moves inside the webcam, the webcam stays put
+
     def near(a: tuple, b: tuple) -> bool:
-        return abs(a[0] + a[2] / 2 - b[0] - b[2] / 2) < a[2] * 0.6 and abs(a[1] + a[3] / 2 - b[1] - b[3] / 2) < a[3] * 0.6
+        return abs(a[0] + a[2] / 2 - b[0] - b[2] / 2) < radius and abs(a[1] + a[3] / 2 - b[1] - b[3] / 2) < radius
 
     best = None
     for face in (f for fr in frames for f in fr):
         same = [next(g for g in fr if near(face, g)) for fr in frames if any(near(face, g) for g in fr)]
-        if len(same) >= max(3, len(frames) // 2 + 1) and (best is None or len(same) > len(best)):
+        if len(same) >= max(3, (len(frames) + 1) // 2) and (best is None or len(same) > len(best)):
             best = same
     if not best:
         return None
     fx, fy, fw, fh = (sorted(v)[len(v) // 2] for v in zip(*best))  # median box: steady against jitter
     gh, gw = grays[0].shape
-    if not gw * 0.04 <= fw <= gw * 0.22:  # too small = blurry when enlarged, too big = full-screen camera
+    if not gw * 0.04 <= fw <= gw * 0.26:  # too small = blurry when enlarged, too big = full-screen camera
         return None
 
     # generous box around the face, then cut at the first straight border line on each side
-    cw, ch = min(fw * 3.4, gw), min(fw * 3.4 * CAM_H / W * 1.3, gh)
+    cw, ch = min(fw * 3.4, gw), min(fw * 3.4 * CAM_H / W * 1.15, gh)
     x0 = int(min(max(fx + fw / 2 - cw / 2, 0), gw - cw))
-    y0 = int(min(max(fy + fh * 0.55 - ch / 2, 0), gh - ch))
+    y0 = int(min(max(fy + fh * 0.75 - ch / 2, 0), gh - ch))  # face in the upper part: shoulders and hands below
     x1, y1 = int(x0 + cw), int(y0 + ch)
     mean = np.mean(np.stack(grays), axis=0).astype(np.uint8)
     edge_y = np.abs(cv2.Sobel(mean, cv2.CV_32F, 0, 1, ksize=3)) > 60
