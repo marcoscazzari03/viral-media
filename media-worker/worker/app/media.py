@@ -352,8 +352,9 @@ def finish(job_dir: Path, job_id: str, duration: float, captions: int, keep: tup
 
 # ---------------------------------------------------------------- render: clip mode
 # Reel layout (1080x1920):
-#   y ~200-470  hook for the first seconds, then the page watermark
-#   y ~505      small source credit
+#   y ~150-330  hook for the first seconds, or a short meme-style line (top_text) for the whole Reel
+#   y ~335      page watermark (after the hook, or from the start with top_text)
+#   y ~395      small source credit
 #   centre      the clip, wider than the frame (sides cropped) over a blurred copy of itself,
 #               slow zoom-in + an optional punch zoom on the key moment
 #   y ~1500     big captions, current word highlighted
@@ -365,6 +366,7 @@ HIGHLIGHT = "&H0000E6FF&"  # ASS colours are BGR: yellow #FFE600
 # Style line template: margins come from the layout (where the clip sits in the frame)
 CLIP_ASS_STYLES = """Style: Caption,DejaVu Sans,96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,8,3,2,70,70,{caption_v},1
 Style: Hook,DejaVu Sans,92,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,22,0,8,60,60,{hook_v},1
+Style: Top,DejaVu Sans,74,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,8,60,60,{top_v},1
 Style: Watermark,DejaVu Sans,46,&H50FFFFFF,&H50FFFFFF,&H90000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,0,8,40,40,{watermark_v},1
 Style: Credit,DejaVu Sans,34,&H40FFFFFF,&H40FFFFFF,&H90000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,40,40,{credit_v},1"""
 
@@ -376,6 +378,7 @@ def clip_layout(fg_h: int) -> dict:
     bottom = top + fg_h
     return {
         "hook_v": max(top - 340, 100),
+        "top_v": max(top - 300, 100),
         "watermark_v": max(top - 110, 230),
         "credit_v": max(top - 48, 290),
         "caption_v": max(H - bottom - 60, 390),
@@ -400,7 +403,7 @@ def even(x: float) -> int:
 
 
 def build_clip_ass(words: list[dict], hook: str, hook_seconds: float, watermark: str, credit: str,
-                   duration: float, layout: dict, words_per_caption: int = 3) -> str:
+                   duration: float, layout: dict, words_per_caption: int = 3, top_text: str = "") -> str:
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {W}
@@ -416,6 +419,10 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = []
+    if top_text:  # meme-style line that frames the clip for its whole length (replaces the hook)
+        hook = ""
+        wrapped = "\\N".join(textwrap.wrap(ass_escape(top_text), width=22))
+        lines.append(f"Dialogue: 3,{ass_time(0)},{ass_time(duration)},Top,,0,0,0,,{wrapped}")
     hook_end = min(hook_seconds, duration)
     if hook:
         wrapped = "\\N".join(textwrap.wrap(ass_escape(hook).upper(), width=18))
@@ -510,7 +517,7 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     hook_seconds = float(params.get("hook_seconds") or 2.5)
     (job_dir / "subs.ass").write_text(build_clip_ass(
         words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), params.get("credit", ""),
-        duration, clip_layout(fg_h), int(params.get("words_per_caption", 3))))
+        duration, clip_layout(fg_h), int(params.get("words_per_caption", 3)), params.get("top_text", "")))
 
     t = f"(on/{FPS})"
     zoom = f"1+0.06*{t}/{duration:.3f}"

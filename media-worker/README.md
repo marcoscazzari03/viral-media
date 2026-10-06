@@ -69,7 +69,9 @@ the watermark takes its place; the Reel ends with a short fade.
 ```
 
 Optional: `fg_scale` (default 1.7), `duck` (default 0.22), `words_per_caption` (default 3), `captions`
-(default true; `"intro_only"` captions just our voice-over, for clips with burned-in subtitles). Clips are capped at `MAX_CLIP_SECONDS` (default 75).
+(default true; `"intro_only"` captions just our voice-over, for clips with burned-in subtitles), `top_text`
+(a short meme-style line shown above the clip for the whole Reel instead of the hook; the watermark then
+shows from the start). `intro` is optional: without it the clip plays with its own audio only. Clips are capped at `MAX_CLIP_SECONDS` (default 75).
 
 ### `transcribe` params
 
