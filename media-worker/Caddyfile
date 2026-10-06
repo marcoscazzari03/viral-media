@@ -8,6 +8,7 @@
 	}
 
 	# Public legal pages (required by the platform developer apps): https://DOMAIN/legal/privacy.html
+	redir /legal /legal/
 	handle /legal/* {
 		root * /srv/site
 		file_server
