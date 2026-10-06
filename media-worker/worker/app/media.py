@@ -333,8 +333,9 @@ def process_render(job_dir: Path, params: dict, job_id: str) -> dict:
 
 
 def finish(job_dir: Path, job_id: str, duration: float, captions: int, keep: tuple = (), extra: dict | None = None) -> dict:
-    run(["ffmpeg", "-y", "-v", "error", "-ss", f"{min(1.0, duration / 2):.2f}", "-i", "reel.mp4", "-frames:v", "1",
-         "-q:v", "3", "cover.jpg"], cwd=job_dir)
+    if not (job_dir / "cover.jpg").exists():  # render_clip may have made a designed cover already
+        run(["ffmpeg", "-y", "-v", "error", "-ss", f"{min(1.0, duration / 2):.2f}", "-i", "reel.mp4", "-frames:v", "1",
+             "-q:v", "3", "cover.jpg"], cwd=job_dir)
     for p in job_dir.iterdir():  # keep only deliverables
         if p.name not in ("reel.mp4", "cover.jpg", "subs.ass", *keep):
             p.unlink(missing_ok=True)
@@ -428,13 +429,13 @@ def accent_words(line: str, accent: str, colour: str = ACCENT) -> str:
                     for w in line.split(" "))
 
 
-def pop_top_events(text: str, accent: str, watermark: str, credit: str, duration: float) -> list[str]:
-    """"Pop" meme line: tilted bold text with the key word in yellow, a yellow swoosh under it, sparks on both
-    sides, then the page handle (small yellow underline) and the source credit. Sits above the clip."""
-    lines = balanced_wrap(ass_escape(text), 18)
+def pop_title(text: str, accent: str, duration: float, y0: int, fs: int, wrap: int, k: float = 1.0,
+              style: str = "Pop") -> tuple[list[str], float]:
+    """"Pop" title: tilted bold text with the key word in yellow, a yellow swoosh under it and sparks on both
+    sides. k scales the strokes (1 = Reel, bigger for the cover). Returns the events and the y under the swoosh."""
+    lines = balanced_wrap(ass_escape(text), wrap)
     n = len(lines)
-    fs = 88 if n <= 2 else 74
-    lh, y0, ang = fs * 1.05, 92, 5
+    lh, ang = fs * 1.05, 5
     cy = y0 + lh * n / 2
     t0, t1 = ass_time(0), ass_time(duration)
 
@@ -447,25 +448,35 @@ def pop_top_events(text: str, accent: str, watermark: str, credit: str, duration
         out = []
         for deg in angles:
             r = math.radians(deg)
-            x0, y_0 = cx + 18 * math.cos(r), cy_ + 18 * math.sin(r)
-            x1, y_1 = cx + 52 * math.cos(r), cy_ + 52 * math.sin(r)
-            px, py = -math.sin(r) * 4, math.cos(r) * 4
+            x0, y_0 = cx + 18 * k * math.cos(r), cy_ + 18 * k * math.sin(r)
+            x1, y_1 = cx + 52 * k * math.cos(r), cy_ + 52 * k * math.sin(r)
+            px, py = -math.sin(r) * 4 * k, math.cos(r) * 4 * k
             out.append(f"m {x0 + px:.0f} {y_0 + py:.0f} l {x1:.0f} {y_1:.0f} l {x0 - px:.0f} {y_0 - py:.0f}")
         return " ".join(out)
 
-    draw = f"\\1c{POP_YELLOW}\\bord2\\3c&H00000000&\\shad0\\p1"
+    draw = f"\\1c{POP_YELLOW}\\bord{2 * k:.0f}\\3c&H00000000&\\shad0\\p1"
     body = "\\N".join(accent_words(line, accent, POP_YELLOW) for line in lines)
-    ev = [f"Dialogue: 4,{t0},{t1},Pop,,0,0,0,,{{\\an8\\pos(540,{y0})\\fs{fs}\\frz{ang}\\org(540,{cy:.0f})}}{body}"]
-    width = max(len(line) for line in lines) * fs * 0.43  # approximate text width (Montserrat Black)
-    sl = min(width * 0.85, 640)
-    sx, sy = rot(540, y0 + n * lh + 10)
+    ev = [f"Dialogue: 4,{t0},{t1},{style},,0,0,0,,{{\\an8\\pos(540,{y0})\\fs{fs}\\frz{ang}\\org(540,{cy:.0f})}}{body}"]
+    half = lambda line: len(line) * fs * 0.43 / 2  # approximate half width of a line (Montserrat Black)
+    sl = min(2 * half(max(lines, key=len)) * 0.85, 640 * k)
+    sx, sy = rot(540, y0 + n * lh + 10 * k)
+    t, u = 10 * k, 20 * k
     ev.append(f"Dialogue: 3,{t0},{t1},Draw,,0,0,0,,{{\\an7\\pos({sx - sl / 2:.0f},{sy:.0f})\\frz{ang}{draw}}}"
-              f"m 0 10 b {sl * .3:.0f} 0 {sl * .7:.0f} -4 {sl:.0f} 0 l {sl:.0f} 7 b {sl * .7:.0f} 5 {sl * .3:.0f} 10 0 20{{\\p0}}")
-    lx, ly = rot(540 - len(lines[0]) * fs * 0.43 / 2 - 22, y0 + lh * 0.5)
-    rx, ry = rot(540 + len(lines[-1]) * fs * 0.43 / 2 + 22, y0 + lh * (n - 0.5))
+              f"m 0 {t:.0f} b {sl * .3:.0f} 0 {sl * .7:.0f} {-0.4 * t:.0f} {sl:.0f} 0 l {sl:.0f} {0.7 * t:.0f} "
+              f"b {sl * .7:.0f} {0.5 * t:.0f} {sl * .3:.0f} {t:.0f} 0 {u:.0f}{{\\p0}}")
+    lx, ly = rot(540 - half(lines[0]) - 22 * k, y0 + lh * 0.5)
+    rx, ry = rot(540 + half(lines[-1]) + 22 * k, y0 + lh * (n - 0.5))
     ev.append(f"Dialogue: 3,{t0},{t1},Draw,,0,0,0,,{{\\an7\\pos(0,0){draw}}}"
               f"{spark(lx, ly, [180, 215, 145])} {spark(rx, ry, [0, 35, -35])}{{\\p0}}")
-    hy = y0 + n * lh + 58
+    return ev, y0 + n * lh + 30 * k
+
+
+def pop_top_events(text: str, accent: str, watermark: str, credit: str, duration: float) -> list[str]:
+    """Pop meme line above the clip, then the page handle (small yellow underline) and the source credit."""
+    n = len(balanced_wrap(ass_escape(text), 18))
+    ev, bottom = pop_title(text, accent, duration, 92, 88 if n <= 2 else 74, 18)
+    t0, t1 = ass_time(0), ass_time(duration)
+    hy = bottom + 28
     if watermark:
         ev.append(f"Dialogue: 2,{t0},{t1},PopHandle,,0,0,0,,{{\\an8\\pos(540,{hy:.0f})}}{ass_escape(watermark)}")
         hl = 260
@@ -474,6 +485,50 @@ def pop_top_events(text: str, accent: str, watermark: str, credit: str, duration
     if credit:
         ev.append(f"Dialogue: 1,{t0},{t1},PopCredit,,0,0,0,,{{\\an8\\pos(540,{hy + 66:.0f})}}{ass_escape(credit)}")
     return ev
+
+
+COVER_ASS = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: CoverTitle,Montserrat Black,124,&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,0,0,0,0,100,100,0,0,1,7,8,8,30,30,0,1
+Style: CoverLabel,Montserrat Black,64,&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,0,0,0,0,100,100,2,0,1,5,5,2,0,0,0,1
+Style: CoverHandle,Montserrat ExtraBold,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,0,0,0,0,100,100,0,0,1,3,3,2,0,0,0,1
+Style: Draw,DejaVu Sans,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+
+def build_cover_ass(title: str, accent: str, label: str, handle: str) -> str:
+    """Instagram cover: big pop title, streamer name and page handle, all inside the 3:4 area the profile grid
+    shows (y 240-1680), over soft dark bands so the text reads on any frame."""
+    n = len(balanced_wrap(ass_escape(title), 16))
+    band = "{{\\an7\\pos(0,0)\\1c&H00000000&\\1a&H{a}&\\bord0\\shad0\\blur60\\p1}}m -100 {y0} l 1180 {y0} l 1180 {y1} l -100 {y1}{{\\p0}}"
+    ev = [f"Dialogue: 1,0:00:00.00,0:00:05.00,Draw,,0,0,0,,{band.format(a='50', y0=120, y1=820 if n <= 2 else 940)}",
+          f"Dialogue: 1,0:00:00.00,0:00:05.00,Draw,,0,0,0,,{band.format(a='60', y0=1460, y1=1720)}"]
+    title_ev, _ = pop_title(title, accent, 5, 330, 124 if n <= 2 else 104, 16, k=1.6, style="CoverTitle")
+    ev += title_ev
+    if label:
+        ev.append(f"Dialogue: 2,0:00:00.00,0:00:05.00,CoverLabel,,0,0,0,,{{\\an2\\pos(540,1560)}}{ass_escape(label).upper()}")
+    if handle:
+        ev.append(f"Dialogue: 2,0:00:00.00,0:00:05.00,CoverHandle,,0,0,0,,{{\\an2\\pos(540,1635)}}{ass_escape(handle)}")
+    return COVER_ASS + "\n".join(ev) + "\n"
+
+
+def make_cover(job_dir: Path, src: str, at: float, cover: dict) -> None:
+    """cover.jpg from the clip itself (no Reel overlays): the frame at `at` zoomed to fill 9:16 + build_cover_ass."""
+    (job_dir / "cover.ass").write_text(build_cover_ass(cover["title"], cover.get("accent", ""), cover.get("label", ""),
+                                                      cover.get("handle", "")))
+    run(["ffmpeg", "-y", "-v", "error", "-ss", f"{max(at, 0):.2f}", "-i", src, "-frames:v", "1", "-vf",
+         f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},eq=contrast=1.08:saturation=1.15,"
+         f"vignette=PI/4,ass=cover.ass", "-q:v", "2", "cover.jpg"], cwd=job_dir)
 
 
 def build_clip_ass(words: list[dict], hook: str, hook_seconds: float, watermark: str, credit: str,
@@ -636,6 +691,13 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
          "-t", f"{duration:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-r", str(FPS),
          "-threads", "0",
          *AUDIO_OUT, "-movflags", "+faststart", "reel.mp4"], cwd=job_dir)
+    cover = params.get("cover") or {}
+    if cover.get("title"):  # designed Instagram cover; on any problem finish() falls back to a plain frame
+        try:
+            at = float(emph) if emph is not None else min(src_dur * 0.4, src_dur - 0.5)
+            make_cover(job_dir, "clip_src.mp4", min(at, max(src_dur - 0.2, 0)), cover)
+        except Exception:
+            (job_dir / "cover.jpg").unlink(missing_ok=True)
     return finish(job_dir, job_id, duration, len(words),
                   extra={"clip_start": start, "clip_end": end, "intro_seconds": round(voice_s, 2),
                          "emphasis_at": emph})
