@@ -7,6 +7,12 @@
 		file_server
 	}
 
+	# Public legal pages (required by the platform developer apps): https://DOMAIN/legal/privacy.html
+	handle /legal/* {
+		root * /srv/site
+		file_server
+	}
+
 	# Job API (protected by bearer token inside the app)
 	handle {
 		reverse_proxy worker:8000
