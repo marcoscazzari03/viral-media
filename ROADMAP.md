@@ -30,8 +30,10 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [ ] Più streamer Twitch tra le fonti (oggi ~7: poche clip forti).
 - [ ] Ripulire i post di test rimasti a metà e la clip bloccata in PROCESSING.
 - [x] 2 Reel al giorno (`publish_max_per_day` = 2).
-- [ ] Pubblicazione su Pagina Facebook.
-- [ ] YouTube Shorts: creare il canale e chiedere subito l'audit API.
+- [x] Pubblicazione su Pagina Facebook (condivisione automatica Meta; da verificare sui primi Reel).
+- [x] YouTube Shorts: canale creato, workflow 06 testato in privato, audit API inviato (6 ottobre).
+- [ ] Dopo l'approvazione dell'audit YouTube: `yt_enabled` = 1, `yt_privacy` = public, attivare il workflow 06.
+- [ ] Svuotare `yt_force_post_key` in `viral_config` (resta il post di test).
 - [ ] Avviso scadenza token Instagram (intorno al 4 dicembre).
 - [ ] Learning loop quando ci sono 5-10 Reel pubblicati.
 - [ ] Rilevamento automatico dei sottotitoli già impressi nelle clip.
