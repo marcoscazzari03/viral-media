@@ -7,7 +7,7 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [x] Clip ELIGIBLE "appiccicose" (picco confermato ≥ 60 e punteggio ancora ≥ 50), finestra Twitch 72 h (scadenza 96 h), minimo 250 views già nel Discovery.
 
 ## Domani, dopo il controllo della prima pubblicazione automatica
-- [ ] Avviso giornaliero (canale da scegliere: Telegram o email; l'Error Handler oggi scrive solo in `viral_runs`) "nessun Reel pubblicato oggi", con il motivo (nuovo workflow `US VIRAL |`, attivato solo dopo ok).
+- [x] Telegram: resoconto serale (05 Daily Report, 20:20 New York), avvisi di errore (00), "Reel pubblicato / fallito" (03).
 - [ ] Stile ispirato a @jakeetimberlake:
   - [ ] frase meme fissa (2-5 parole, ironica) per tutto il video, al posto dell'hook che sparisce;
   - [ ] voce AI opzionale, per un A/B test con e senza voce;
@@ -21,7 +21,7 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 ## Più avanti
 - [ ] Più streamer Twitch tra le fonti (oggi ~7: poche clip forti).
 - [ ] Ripulire i post di test rimasti a metà e la clip bloccata in PROCESSING.
-- [ ] Passare a 2 Reel al giorno (`publish_max_per_day` = 2) se i primi giorni vanno bene.
+- [x] 2 Reel al giorno (`publish_max_per_day` = 2).
 - [ ] Pubblicazione su Pagina Facebook.
 - [ ] YouTube Shorts: creare il canale e chiedere subito l'audit API.
 - [ ] Avviso scadenza token Instagram (intorno al 4 dicembre).
