@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIPER_VOICE=/opt/piper/en_US-lessac-medium.onnx
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core curl ca-certificates unzip \
+ && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fonts-montserrat curl ca-certificates unzip \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
