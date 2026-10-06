@@ -1,0 +1,1926 @@
+{
+  "name": "01 - US VIRAL | Discovery Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "expression": "7 */2 * * *",
+              "field": "cronExpression"
+            }
+          ]
+        }
+      },
+      "id": "4eab5ec3-ce17-43bf-8ece-7d290f9e9bc6",
+      "name": "Every 2 Hours :07",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Discovery Engine trigger. Runs hourly at :07 (America/New_York). Workflow stays INACTIVE until explicit approval."
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_config",
+          "mode": "list",
+          "value": "K9NPI0QIqVOkuHD1"
+        },
+        "returnAll": true
+      },
+      "id": "7865b39d-ffea-493d-bd9a-036f6540235f",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        0
+      ],
+      "notes": "Reads score weights and thresholds from viral_config. No hardcoded values in the workflow."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Init Run — builds the run context and a typed config object from viral_config rows.\n// Any missing key falls back to DEFAULTS, so deleting a row never breaks the run.\n\nconst DEFAULTS = {\n  w_velocity: 0.30,\n  w_outperformance: 0.20,\n  w_acceleration: 0.20,\n  w_engagement: 0.10,\n  w_recency: 0.10,\n  w_priority: 0.10,\n  vph_log_floor: 3,\n  vph_log_ceil: 6,\n  engagement_cap: 0.08,\n  recency_tau_h: 36,\n  min_velocity_interval_h: 0.5,\n  eligible_score_min: 60,\n  eligible_score_min_lowconf: 80,\n  eligible_max_age_h: 48,\n  expire_age_h: 72,\n  min_duration_s: 15,\n  max_duration_s: 1800,\n  watchlist_items_per_source: 10,\n  charts_enabled: 1,\n  charts_max_pages: 2,\n  charts_excluded_categories: '1,10',\n  allowed_languages: 'en,en-US,en-GB',\n  snapshot_retention_days: 5,\n  title_exclude_keywords: 'official music video,official video,lyric video,lyrics,official audio,visualizer,trailer,teaser',\n  twitch_client_id: '',\n  twitch_clip_window_h: 48,\n  twitch_clips_per_source: 20,\n  twitch_min_duration_s: 5,\n  twitch_vph_log_floor: 1,\n  twitch_vph_log_ceil: 3,\n  twitch_eligible_max_age_h: 72,\n  twitch_expire_age_h: 96,\n  twitch_eligible_min_views: 250,\n  eligible_keep_min: 50,\n};\n\nconst LIST_KEYS = ['charts_excluded_categories', 'allowed_languages', 'title_exclude_keywords'];\nconst WEIGHT_KEYS = ['w_velocity', 'w_outperformance', 'w_acceleration', 'w_engagement', 'w_recency', 'w_priority'];\n\nconst warnings = [];\nconst config = { ...DEFAULTS };\nconst seen = new Set();\n\n// 1. Read rows from viral_config\nfor (const item of $input.all()) {\n  const r = item.json;\n  const key = String(r.key ?? '').trim();\n  if (!key) continue;\n  if (seen.has(key)) warnings.push(`duplicate key \"${key}\": last row wins`);\n  seen.add(key);\n\n  const hasNum = r.value_number !== null && r.value_number !== undefined && Number.isFinite(Number(r.value_number));\n  const hasStr = typeof r.value_string === 'string' && r.value_string.trim() !== '';\n\n  if (typeof DEFAULTS[key] === 'number') {\n    const v = hasNum ? Number(r.value_number) : (hasStr ? Number(r.value_string) : NaN);\n    if (Number.isFinite(v)) config[key] = v;\n    else warnings.push(`key \"${key}\" has no valid number: default ${DEFAULTS[key]} used`);\n  } else if (hasStr) {\n    config[key] = r.value_string.trim();\n  } else if (hasNum) {\n    config[key] = Number(r.value_number);\n  } else {\n    warnings.push(`key \"${key}\" is empty: default used`);\n  }\n}\n\nfor (const key of Object.keys(DEFAULTS)) {\n  if (!seen.has(key)) warnings.push(`key \"${key}\" missing in viral_config: default used`);\n}\n\n// 2. Comma-separated strings -> arrays\nfor (const key of LIST_KEYS) {\n  config[key] = String(config[key] ?? '')\n    .split(',')\n    .map(s => s.trim())\n    .filter(Boolean);\n}\nconfig.allowed_languages = config.allowed_languages.map(s => s.toLowerCase());\nconfig.title_exclude_keywords = config.title_exclude_keywords.map(s => s.toLowerCase());\n\n// 3. Weights must sum to 1 (normalize if they do not)\nconst weightSum = WEIGHT_KEYS.reduce((s, k) => s + Math.max(0, config[k]), 0);\nif (weightSum <= 0) {\n  WEIGHT_KEYS.forEach(k => (config[k] = DEFAULTS[k]));\n  warnings.push('all score weights <= 0: defaults restored');\n} else if (Math.abs(weightSum - 1) > 0.001) {\n  WEIGHT_KEYS.forEach(k => (config[k] = Math.max(0, config[k]) / weightSum));\n  warnings.push(`score weights summed to ${weightSum.toFixed(3)}: normalized to 1`);\n}\n\n// 4. Basic sanity checks\nif (config.vph_log_ceil <= config.vph_log_floor) {\n  config.vph_log_floor = DEFAULTS.vph_log_floor;\n  config.vph_log_ceil = DEFAULTS.vph_log_ceil;\n  warnings.push('vph_log_ceil <= vph_log_floor: defaults restored');\n}\nif (config.twitch_vph_log_ceil <= config.twitch_vph_log_floor) {\n  config.twitch_vph_log_floor = DEFAULTS.twitch_vph_log_floor;\n  config.twitch_vph_log_ceil = DEFAULTS.twitch_vph_log_ceil;\n  warnings.push('twitch_vph_log_ceil <= twitch_vph_log_floor: defaults restored');\n}\nif (config.max_duration_s <= config.min_duration_s) {\n  config.min_duration_s = DEFAULTS.min_duration_s;\n  config.max_duration_s = DEFAULTS.max_duration_s;\n  warnings.push('max_duration_s <= min_duration_s: defaults restored');\n}\nif (config.eligible_max_age_h > config.expire_age_h) {\n  warnings.push('eligible_max_age_h > expire_age_h: candidates will expire before losing eligibility');\n}\nconfig.watchlist_items_per_source = Math.min(50, Math.max(1, Math.round(config.watchlist_items_per_source)));\nconfig.charts_max_pages = Math.min(4, Math.max(0, Math.round(config.charts_max_pages)));\nconfig.charts_enabled = config.charts_enabled ? 1 : 0;\nconfig.twitch_clips_per_source = Math.min(100, Math.max(1, Math.round(config.twitch_clips_per_source)));\nif (!config.twitch_client_id) warnings.push('twitch_client_id missing: Twitch source disabled');\n\n// 5. Run context\nconst now = new Date();\nconst runId = `disc-${$now.toFormat('yyyyMMdd-HHmm')}-${$execution.id}`;\n\nreturn [{\n  json: {\n    run_id: runId,\n    workflow: '01 - US VIRAL | Discovery Engine',\n    execution_mode: $execution.mode,\n    started_at: now.toISOString(),\n    started_at_ms: now.getTime(),\n    config_rows: seen.size,\n    config_warnings: warnings,\n    config,\n  },\n}];\n"
+      },
+      "id": "94bbcd38-378a-4725-8c2f-f77413cbad89",
+      "name": "Init Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "notes": "Builds run_id + typed config (defaults, weight normalization, sanity checks). Downstream nodes read $('Init Run').first().json.config"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_sources",
+          "mode": "list",
+          "value": "ULvhVxUCOHh4vjmO"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "active",
+              "condition": "isTrue"
+            },
+            {
+              "keyName": "platform",
+              "keyValue": "youtube"
+            }
+          ]
+        },
+        "returnAll": true,
+        "orderBy": true,
+        "orderByColumn": "priority"
+      },
+      "id": "9a5339fd-7dad-42d1-8bdc-c04db469fddd",
+      "name": "Get Active Sources",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        0
+      ],
+      "alwaysOutputData": true,
+      "notes": "Watchlist: active YouTube sources by priority. alwaysOutputData ON: empty watchlist must not stop the charts branch (handled in next Code node)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.uploads_playlist_id }}",
+              "operator": {
+                "operation": "empty",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            },
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.handle }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e847dfa1-25ec-4355-a02d-09903ce45bcb",
+      "name": "Needs Channel ID",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        880,
+        -208
+      ],
+      "notes": "Only sources with a handle but no uploads_playlist_id go to resolution."
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/youtube/v3/channels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "id,snippet,contentDetails"
+            },
+            {
+              "name": "forHandle",
+              "value": "={{ $json.handle }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "f81ba7b0-0864-4f7b-be21-e138660eac13",
+      "name": "YT Resolve Handle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1104,
+        -208
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "channels.list forHandle = 1 quota unit. Runs only once per new source.",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "XLgg21h8Ot8uyTe7",
+          "name": "US VIRAL - YouTube API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map Resolved IDs — pairs each channels.list response with its viral_sources row.\n// Emits only sources that were resolved successfully (they get saved next).\n// Failed handles are simply retried on the next run (1 quota unit each).\n\nconst sources = $('Needs Channel ID').all();\nconst out = [];\n\n$input.all().forEach((item, i) => {\n  const p = item.pairedItem;\n  const idx = Array.isArray(p) ? p[0]?.item : p?.item;\n  const src = sources[idx ?? i]?.json ?? {};\n  const r = item.json ?? {};\n  const ch = Array.isArray(r.items) ? r.items[0] : null;\n  const uploads = ch?.contentDetails?.relatedPlaylists?.uploads;\n\n  if (r.error || !ch || !uploads || src.id === undefined) return;\n\n  out.push({\n    json: {\n      id: src.id,\n      source_key: src.source_key,\n      handle: src.handle,\n      external_id: ch.id,\n      uploads_playlist_id: uploads,\n      channel_title: ch.snippet?.title ?? null,\n      channel_country: ch.snippet?.country ?? null,\n    },\n    pairedItem: { item: i },\n  });\n});\n\nreturn out;\n"
+      },
+      "id": "c534639a-6288-4ae2-b407-5aee25e0621b",
+      "name": "Map Resolved IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        -208
+      ],
+      "notes": "Pairs channels.list responses with source rows; emits only resolved sources."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_sources",
+          "mode": "list",
+          "value": "ULvhVxUCOHh4vjmO"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "external_id": "={{ $json.external_id }}",
+            "uploads_playlist_id": "={{ $json.uploads_playlist_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "source_key",
+              "displayName": "source_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "platform",
+              "displayName": "platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source_type",
+              "displayName": "source_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "external_id",
+              "displayName": "external_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "uploads_playlist_id",
+              "displayName": "uploads_playlist_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pillar",
+              "displayName": "pillar",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "active",
+              "displayName": "active",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "rights_mode",
+              "displayName": "rights_mode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "baseline_vph",
+              "displayName": "baseline_vph",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "learned_weight",
+              "displayName": "learned_weight",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_polled_at",
+              "displayName": "last_polled_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "notes",
+              "displayName": "notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "handle",
+              "displayName": "handle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "0397f7bc-92e9-4fca-877f-dce8ab9aff0c",
+      "name": "Save Source IDs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1552,
+        -208
+      ],
+      "notes": "Writes external_id + uploads_playlist_id into viral_sources (by row id)."
+    },
+    {
+      "id": "1afdb719-681d-435b-8e7c-ffcfebddece8",
+      "name": "Build Watchlist Requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        160
+      ],
+      "parameters": {
+        "jsCode": "// Build Watchlist Requests — one item per active YouTube source with a known uploads playlist.\n// IDs resolved earlier in this same run (Resolve Channel IDs branch) are used immediately.\n\nconst cfg = $('Init Run').first().json.config;\n\nconst resolved = {};\ntry {\n  if ($('Map Resolved IDs').isExecuted) {\n    for (const it of $('Map Resolved IDs').all()) resolved[it.json.id] = it.json;\n  }\n} catch (e) {\n  // branch not executed in this run: nothing to merge\n}\n\nconst out = [];\nfor (const item of $input.all()) {\n  const s = item.json ?? {};\n  if (!s.source_key) continue; // empty watchlist placeholder\n  const r = resolved[s.id];\n  const playlist = s.uploads_playlist_id || r?.uploads_playlist_id;\n  if (!playlist) continue; // handle not resolved yet: retried next run\n\n  out.push({\n    json: {\n      source_row_id: s.id,\n      source_key: s.source_key,\n      name: s.name,\n      channel_id: s.external_id || r?.external_id || null,\n      uploads_playlist_id: playlist,\n      category: s.category ?? null,\n      pillar: s.pillar ?? null,\n      priority: Number(s.priority ?? 3),\n      learned_weight: Number(s.learned_weight ?? 1),\n      baseline_vph: s.baseline_vph ?? null,\n      rights_mode: s.rights_mode || 'discovery_only',\n      max_results: cfg.watchlist_items_per_source,\n    },\n  });\n}\n\nreturn out;\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "One item per creator with a known uploads playlist (uses IDs resolved in this same run)."
+    },
+    {
+      "id": "2d1a835d-9b0d-40cd-beaa-6e112af69815",
+      "name": "YT Uploads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1100,
+        160
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "method": "GET",
+        "options": {
+          "timeout": 15000
+        },
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "contentDetails"
+            },
+            {
+              "name": "playlistId",
+              "value": "={{ $json.uploads_playlist_id }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "={{ $json.max_results }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "url": "https://www.googleapis.com/youtube/v3/playlistItems"
+      },
+      "notes": "playlistItems.list: latest N uploads per creator. 1 quota unit per creator.",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "XLgg21h8Ot8uyTe7",
+          "name": "US VIRAL - YouTube API Key"
+        }
+      }
+    },
+    {
+      "id": "1798084e-8c9e-4c19-867f-e661594fd798",
+      "name": "Get Tracked Candidates",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        160
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_candidates",
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "status",
+              "keyValue": "WATCHING"
+            },
+            {
+              "condition": "eq",
+              "keyName": "status",
+              "keyValue": "ELIGIBLE"
+            },
+            {
+              "condition": "gte",
+              "keyName": "published_at",
+              "keyValue": "={{ $now.minus({ hours: $('Init Run').first().json.config.expire_age_h + 6 }).toISO() }}"
+            }
+          ]
+        },
+        "matchType": "anyCondition",
+        "operation": "get",
+        "resource": "row",
+        "returnAll": true
+      },
+      "notes": "Candidates to refresh (WATCHING/ELIGIBLE) + any recent row of any status, so Discovery never overwrites SELECTED/READY/PUBLISHED. alwaysOutputData: table may be empty.",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "50e467a5-f37f-42ef-9855-655fc5f56a88",
+      "name": "YT Charts US",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1540,
+        160
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "method": "GET",
+        "options": {
+          "pagination": {
+            "pagination": {
+              "completeExpression": "={{ !$response.body.nextPageToken }}",
+              "limitPagesFetched": true,
+              "maxRequests": "={{ Math.max(1, $('Init Run').first().json.config.charts_max_pages) }}",
+              "paginationCompleteWhen": "other",
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "name": "pageToken",
+                    "type": "qs",
+                    "value": "={{ $response.body.nextPageToken }}"
+                  }
+                ]
+              },
+              "requestInterval": 200
+            }
+          },
+          "timeout": 20000
+        },
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet,contentDetails,statistics,status"
+            },
+            {
+              "name": "chart",
+              "value": "mostPopular"
+            },
+            {
+              "name": "regionCode",
+              "value": "US"
+            },
+            {
+              "name": "maxResults",
+              "value": "50"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "url": "https://www.googleapis.com/youtube/v3/videos"
+      },
+      "notes": "videos.list chart=mostPopular US. 1 unit per page; pages limited by config.charts_max_pages. Secondary source (Music/Film excluded later).",
+      "onError": "continueRegularOutput",
+      "executeOnce": true,
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "XLgg21h8Ot8uyTe7",
+          "name": "US VIRAL - YouTube API Key"
+        }
+      }
+    },
+    {
+      "id": "c6de99eb-2a3c-4164-a12a-eac2aa98226d",
+      "name": "Build Video Batches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        160
+      ],
+      "parameters": {
+        "jsCode": "// Build Video Batches — merges every video ID found in this run into batches of 50 for videos.list.\n// Sources: watchlist uploads (only recent ones), tracked candidates (WATCHING/ELIGIBLE), YouTube charts.\n// Chart videos already contain full details, so they are NOT refetched (saves quota).\n// First item carries `meta` (videoId -> how it was discovered) used later by the scoring node.\n\nconst run = $('Init Run').first().json;\nconst cfg = run.config;\nconst nowMs = run.started_at_ms;\nconst maxAgeMs = cfg.expire_age_h * 3600 * 1000;\n\nconst meta = {};\nconst add = (id, via, sourceKey) => {\n  if (!id) return;\n  const m = (meta[id] ??= { via: [], source_key: null });\n  if (!m.via.includes(via)) m.via.push(via);\n  if (sourceKey && !m.source_key) m.source_key = sourceKey;\n};\nconst pairIndex = (item, i) => {\n  const p = item.pairedItem;\n  const idx = Array.isArray(p) ? p[0]?.item : p?.item;\n  return idx ?? i;\n};\n\nconst stats = { uploads_seen: 0, uploads_recent: 0, tracked_refresh: 0, charts_items: 0 };\n\n// 1. Watchlist uploads (keep only videos younger than expire_age_h)\nconst requests = $('Build Watchlist Requests').all();\n$('YT Uploads').all().forEach((item, i) => {\n  const src = requests[pairIndex(item, i)]?.json ?? {};\n  for (const pi of item.json?.items ?? []) {\n    stats.uploads_seen++;\n    const id = pi.contentDetails?.videoId;\n    const pub = Date.parse(pi.contentDetails?.videoPublishedAt ?? '');\n    if (!id || !Number.isFinite(pub) || nowMs - pub > maxAgeMs) continue;\n    stats.uploads_recent++;\n    add(id, 'watchlist', src.source_key);\n  }\n});\n\n// 2. Tracked YouTube candidates to refresh (Twitch ones are refreshed by the Twitch branch)\nfor (const item of $('Get Tracked Candidates').all()) {\n  const r = item.json ?? {};\n  if (!r.content_id || (r.platform ?? 'youtube') !== 'youtube' || !['WATCHING', 'ELIGIBLE'].includes(r.status)) continue;\n  stats.tracked_refresh++;\n  add(r.content_id, 'tracked', r.source_key);\n}\n\n// 3. Charts (details already available, not refetched)\nconst chartIds = new Set();\nif (cfg.charts_enabled) {\n  for (const page of $('YT Charts US').all()) {\n    for (const v of page.json?.items ?? []) {\n      if (!v?.id) continue;\n      stats.charts_items++;\n      chartIds.add(v.id);\n      add(v.id, 'charts', null);\n    }\n  }\n}\n\n// 4. Batches of 50 IDs (videos.list limit)\nconst toFetch = Object.keys(meta).filter(id => !chartIds.has(id));\nconst batches = [];\nfor (let i = 0; i < toFetch.length; i += 50) batches.push(toFetch.slice(i, i + 50));\nif (batches.length === 0) batches.push([]); // keep the chain alive: charts/tracked still need scoring\n\nreturn batches.map((ids, i) => ({\n  json: {\n    batch_index: i,\n    batch_count: batches.length,\n    ids: ids.join(','),\n    id_count: ids.length,\n    ...(i === 0 ? { meta, stats: { ...stats, unique_ids: Object.keys(meta).length, to_fetch: toFetch.length } } : {}),\n  },\n}));\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Merges IDs from watchlist (recent only), tracked candidates and charts. Batches of 50 for videos.list. First item carries meta + stats."
+    },
+    {
+      "id": "b045accc-5866-4e10-b444-a4bf10d17b83",
+      "name": "YT Video Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1980,
+        160
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "method": "GET",
+        "options": {
+          "timeout": 20000
+        },
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet,contentDetails,statistics,status"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.ids }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "50"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "url": "https://www.googleapis.com/youtube/v3/videos"
+      },
+      "notes": "videos.list for up to 50 IDs per call = 1 quota unit per batch.",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "XLgg21h8Ot8uyTe7",
+          "name": "US VIRAL - YouTube API Key"
+        }
+      }
+    },
+    {
+      "id": "6aeec0d5-775d-4c4b-9d93-3e6f89b6f81e",
+      "name": "Score & State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        160
+      ],
+      "parameters": {
+        "jsCode": "// Score & State — computes metrics, Trend Score and state transitions for every video/clip of this run\n// (YouTube videos and Twitch clips are normalised to the same record first).\n// Pure math, no AI. Output = one row per candidate to upsert into viral_candidates (+ _snapshot, _summary).\n// Rules:\n//  - Rows owned by other workflows (SELECTED, PROCESSING, READY, SCHEDULED, PUBLISHED, ...) are never touched.\n//  - New videos failing hard filters are NOT stored (only counted). Tracked ones become REJECTED/EXPIRED.\n//  - If a tracked video was checked less than min_velocity_interval_h ago, it is skipped (no fake velocity).\n\nconst run = $('Init Run').first().json;\nconst cfg = run.config;\nconst nowMs = run.started_at_ms;\nconst nowIso = run.started_at;\nconst batch0 = $('Build Video Batches').first().json;\nconst meta = batch0.meta ?? {};\n\nconst OWNED_BY_DISCOVERY = ['WATCHING', 'ELIGIBLE'];\nconst CATEGORY_PILLAR = { '20': 'gaming', '17': 'sports', '23': 'comedy', '24': 'entertainment', '22': 'people', '28': 'tech', '10': 'music', '1': 'film' };\n\n// ---------- helpers ----------\nconst clamp = (x, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, x));\nconst num = v => (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));\nconst round = (x, d = 2) => (x === null || !Number.isFinite(x) ? null : Math.round(x * 10 ** d) / 10 ** d);\nconst isoDurationToSec = s => {\n  const m = /^P(?:(\\d+)D)?(?:T(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?)?$/.exec(s ?? '');\n  if (!m) return null;\n  return (+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0);\n};\nconst langOk = lang => {\n  if (!lang) return true; // unknown language accepted\n  const l = lang.toLowerCase();\n  return cfg.allowed_languages.includes(l) || cfg.allowed_languages.includes(l.split('-')[0]);\n};\n\n// ---------- lookups ----------\nconst sources = {};\nconst sourceByChannel = {};\nlet twitchSources = [];\ntry { twitchSources = $('Get Twitch Sources').all(); } catch (e) { twitchSources = []; }\nfor (const it of [...$('Get Active Sources').all(), ...twitchSources]) {\n  const s = it.json ?? {};\n  if (!s.source_key) continue;\n  sources[s.source_key] = s;\n  if (s.external_id) sourceByChannel[s.external_id] = s;\n}\nconst existing = {};\nfor (const it of $('Get Tracked Candidates').all()) {\n  const r = it.json ?? {};\n  if (r.candidate_key) existing[r.candidate_key] = r;\n}\n\n// ---------- collect + normalise items (YouTube videos, Twitch clips) ----------\nconst records = {};\nconst ytRecord = v => {\n  const sn = v.snippet ?? {};\n  const st = v.statistics ?? {};\n  const thumbs = sn.thumbnails ?? {};\n  return {\n    platform: 'youtube',\n    id: v.id,\n    url: `https://www.youtube.com/watch?v=${v.id}`,\n    title: sn.title ?? '',\n    channelId: sn.channelId ?? null,\n    channelTitle: sn.channelTitle ?? null,\n    publishedAt: sn.publishedAt,\n    views: num(st.viewCount) ?? 0,\n    likes: num(st.likeCount),\n    comments: num(st.commentCount),\n    duration: isoDurationToSec(v.contentDetails?.duration),\n    categoryId: sn.categoryId ?? null,\n    lang: (sn.defaultAudioLanguage || sn.defaultLanguage || '').toLowerCase(),\n    live: sn.liveBroadcastContent ?? 'none',\n    license: v.status?.license ?? null,\n    madeForKids: v.status?.madeForKids === true,\n    thumbnail: (thumbs.maxres ?? thumbs.high ?? thumbs.medium ?? thumbs.default)?.url ?? null,\n    metaSourceKey: meta[v.id]?.source_key ?? null,\n    via: meta[v.id]?.via ?? [],\n  };\n};\nfor (const it of $('YT Video Details').all()) for (const v of it.json?.items ?? []) if (v?.id) records[`youtube:${v.id}`] = ytRecord(v);\nif (cfg.charts_enabled) {\n  for (const it of $('YT Charts US').all()) for (const v of it.json?.items ?? []) if (v?.id && !records[`youtube:${v.id}`]) records[`youtube:${v.id}`] = ytRecord(v);\n}\n\nconst twitchSourceByBroadcaster = {};\nlet twitchRequests = [];\ntry { twitchRequests = $('Build Clip Requests').all().map(i => i.json ?? {}); } catch (e) { twitchRequests = []; }\nfor (const r of twitchRequests) if (r.broadcaster_id) twitchSourceByBroadcaster[r.broadcaster_id] = r.source_key;\nlet twitchItems = [];\ntry { twitchItems = $('Twitch Clips').all(); } catch (e) { twitchItems = []; }\nfor (const it of twitchItems) {\n  for (const c of it.json?.data ?? []) {\n    if (!c?.id) continue;\n    records[`twitch:${c.id}`] = {\n      platform: 'twitch',\n      id: c.id,\n      url: c.url,\n      title: c.title ?? '',\n      channelId: c.broadcaster_id ?? null,\n      channelTitle: c.broadcaster_name ?? null,\n      publishedAt: c.created_at,\n      views: num(c.view_count) ?? 0,\n      likes: null,\n      comments: null,\n      duration: num(c.duration),\n      categoryId: null,\n      lang: (c.language || '').toLowerCase(),\n      live: 'none',\n      license: 'twitch',\n      madeForKids: false,\n      thumbnail: c.thumbnail_url ?? null,\n      metaSourceKey: twitchSourceByBroadcaster[c.broadcaster_id] ?? null,\n      via: ['twitch_clips'],\n    };\n  }\n}\n\nconst summary = {\n  videos_evaluated: 0, new_candidates: 0, updated_candidates: 0, eligible: 0, expired: 0, rejected: 0,\n  skipped_locked: 0, skipped_too_soon: 0, rejected_new: 0, reject_reasons: {},\n};\nconst reject = reason => (summary.reject_reasons[reason] = (summary.reject_reasons[reason] || 0) + 1);\n\nconst rows = [];\n\nfor (const [key, rec] of Object.entries(records)) {\n  summary.videos_evaluated++;\n  const id = rec.id;\n  const ex = existing[key];\n\n  // 1. Never touch rows owned by Factory/Publisher\n  if (ex && !OWNED_BY_DISCOVERY.includes(ex.status)) { summary.skipped_locked++; continue; }\n\n  // 2. Parsed fields\n  const pubMs = Date.parse(rec.publishedAt ?? '');\n  const views = rec.views;\n  const likes = rec.likes;\n  const comments = rec.comments;\n  const duration = rec.duration;\n  const categoryId = rec.categoryId;\n  const lang = rec.lang;\n  const ageH = Math.max((nowMs - pubMs) / 3.6e6, 0.25);\n\n  // 3. Source resolution: discovery meta -> existing row -> channel match -> charts\n  const src =\n    sources[rec.metaSourceKey] ?? sources[ex?.source_key] ?? sourceByChannel[rec.channelId] ?? null;\n  const sourceKey = src?.source_key ?? rec.metaSourceKey ?? ex?.source_key ?? `${rec.platform}:chart_us`;\n  const priority = num(src?.priority) ?? 2;\n  const learnedWeight = num(src?.learned_weight) ?? 1;\n  const baseline = num(src?.baseline_vph);\n\n  // 4. Hard filters\n  let hardFail = null;\n  if (!Number.isFinite(pubMs)) hardFail = 'no_publish_date';\n  else if (rec.live && rec.live !== 'none') hardFail = 'live_or_upcoming';\n  else if (categoryId && cfg.charts_excluded_categories.includes(String(categoryId))) hardFail = `category_${categoryId}`;\n  else if (!langOk(lang)) hardFail = 'language';\n  else if ((cfg.title_exclude_keywords ?? []).some(k => rec.title.toLowerCase().includes(k))) hardFail = 'title_keyword';\n  else if (rec.madeForKids) hardFail = 'made_for_kids';\n  else if (duration === null || duration < (rec.platform === 'twitch' ? (cfg.twitch_min_duration_s ?? 5) : cfg.min_duration_s)) hardFail = 'too_short';\n  else if (duration > cfg.max_duration_s) hardFail = 'too_long';\n  // Twitch clips keep getting views for days: they get their own (longer) windows\n  const isTwitch = rec.platform === 'twitch';\n  const expireH = isTwitch ? cfg.twitch_expire_age_h : cfg.expire_age_h;\n  const eligibleMaxH = isTwitch ? cfg.twitch_eligible_max_age_h : cfg.eligible_max_age_h;\n  const tooOld = ageH > expireH;\n\n  if (!ex && (hardFail || tooOld)) { summary.rejected_new++; reject(hardFail ?? 'too_old'); continue; }\n\n  // 5. Velocity / acceleration\n  let vphRecent, accel;\n  const avgVph = views / ageH;\n  if (ex) {\n    const dtH = (nowMs - Date.parse(ex.last_checked_at)) / 3.6e6;\n    if (!Number.isFinite(dtH) || dtH < cfg.min_velocity_interval_h) { summary.skipped_too_soon++; continue; }\n    vphRecent = Math.max(0, views - (num(ex.views) ?? 0)) / dtH;\n    accel = clamp(vphRecent / Math.max(num(ex.velocity_views_hour) ?? avgVph, 1), 0.05, 20);\n  } else {\n    vphRecent = avgVph; // first sighting fallback\n    accel = 1;          // neutral\n  }\n\n  // 6. Engagement (likes can be hidden)\n  let engagement = null;\n  if (views > 0 && likes !== null) engagement = (likes + 2 * (comments ?? 0)) / views;\n  else if (views > 0 && comments !== null) engagement = (3 * comments) / views;\n\n  // 7. Components 0..1\n  // Twitch clips get far fewer views than YouTube videos: each platform has its own velocity scale\n  const vFloor = rec.platform === 'twitch' ? cfg.twitch_vph_log_floor : cfg.vph_log_floor;\n  const vCeil = rec.platform === 'twitch' ? cfg.twitch_vph_log_ceil : cfg.vph_log_ceil;\n  const V = clamp((Math.log10(Math.max(vphRecent, 1)) - vFloor) / (vCeil - vFloor));\n  const O = baseline && baseline > 0 ? clamp((Math.log2(Math.max(vphRecent, 1) / baseline) + 1) / 4) : 0.5;\n  const A = clamp((Math.log2(accel) + 1) / 2);\n  const E = engagement === null ? 0.5 : clamp(engagement / cfg.engagement_cap);\n  const R = Math.exp(-ageH / cfg.recency_tau_h);\n  const P = clamp(((priority - 1) / 4) * learnedWeight);\n  const score = round(100 * (cfg.w_velocity * V + cfg.w_outperformance * O + cfg.w_acceleration * A +\n    cfg.w_engagement * E + cfg.w_recency * R + cfg.w_priority * P), 1);\n\n  const snapshotCount = (num(ex?.snapshot_count) ?? 0) + 1;\n  const confidence = snapshotCount >= 3 ? 'high' : snapshotCount === 2 ? 'med' : 'low';\n\n  // 8. Rights (deterministic, from source rights_mode + YouTube license)\n  const rightsMode = src?.rights_mode ?? 'discovery_only';\n  const rightsStatus = ['permission', 'licensed', 'own'].includes(rightsMode) ? 'ALLOWED'\n    : rec.license === 'creativeCommon' ? 'ALLOWED_CC' : 'DISCOVERY_ONLY';\n\n  // 9. State machine\n  let newStatus, reason;\n  // ELIGIBLE = good score now, OR a confirmed peak above the bar while the score has not collapsed\n  // (fast clips peak while still small: without this they drop out before reaching enough views).\n  // Twitch also needs a minimum of views, so ELIGIBLE means \"ready for the Factory\".\n  const peak = Math.max(score, num(ex?.peak_trend_score) ?? 0);\n  const scoreNow = (confidence !== 'low' && score >= cfg.eligible_score_min) || score >= cfg.eligible_score_min_lowconf;\n  const scoreKept = snapshotCount >= 2 && peak >= cfg.eligible_score_min && score >= cfg.eligible_keep_min;\n  const viewsOk = !isTwitch || views >= cfg.twitch_eligible_min_views;\n  if (tooOld) { newStatus = 'EXPIRED'; reason = `age ${Math.round(ageH)}h > ${expireH}h`; }\n  else if (hardFail) { newStatus = 'REJECTED'; reason = hardFail; }\n  else if (ageH > eligibleMaxH) { newStatus = 'WATCHING'; reason = `age ${Math.round(ageH)}h > eligible window`; }\n  else if ((scoreNow || scoreKept) && viewsOk) {\n    newStatus = 'ELIGIBLE'; reason = scoreNow ? `score ${score} (${confidence})` : `score ${score}, peak ${peak} (kept)`;\n  } else if (scoreNow || scoreKept) {\n    newStatus = 'WATCHING'; reason = `score ${score} but ${views} views < ${cfg.twitch_eligible_min_views}`;\n  } else { newStatus = 'WATCHING'; reason = `score ${score} (${confidence})`; }\n\n  const prevStatus = ex?.status ?? null;\n  if (!ex) summary.new_candidates++; else summary.updated_candidates++;\n  if (newStatus === 'ELIGIBLE') summary.eligible++;\n  if (newStatus === 'EXPIRED') summary.expired++;\n  if (newStatus === 'REJECTED') summary.rejected++;\n\n  const via = [...new Set([...(ex?.discovered_via ? ex.discovered_via.split(',') : []), ...rec.via])].filter(Boolean);\n\n  rows.push({\n    json: {\n      candidate_key: key,\n      platform: rec.platform,\n      content_id: id,\n      source_key: sourceKey,\n      discovered_via: via.join(',') || 'tracked',\n      creator_id: rec.channelId,\n      creator_name: rec.channelTitle,\n      title: rec.title.slice(0, 300),\n      url: rec.url,\n      thumbnail_url: rec.thumbnail,\n      category: src?.category ?? 'chart',\n      yt_category_id: categoryId,\n      pillar: src?.pillar ?? CATEGORY_PILLAR[categoryId] ?? 'other',\n      language: lang || null,\n      license: rec.license,\n      published_at: new Date(pubMs).toISOString(),\n      first_seen_at: ex?.first_seen_at ?? nowIso,\n      last_checked_at: nowIso,\n      duration_seconds: duration,\n      views,\n      likes,\n      comments,\n      avg_views_hour: round(avgVph, 1),\n      velocity_views_hour: round(vphRecent, 1),\n      accel_ratio: round(accel, 3),\n      engagement_rate: round(engagement, 4),\n      trend_score: score,\n      peak_trend_score: peak,\n      score_confidence: confidence,\n      snapshot_count: snapshotCount,\n      prev_views: ex ? num(ex.views) : null,\n      prev_checked_at: ex?.last_checked_at ?? null,\n      prev_velocity: ex ? num(ex.velocity_views_hour) : null,\n      source_priority: priority,\n      status: newStatus,\n      status_reason: reason,\n      status_changed_at: newStatus !== prevStatus ? nowIso : (ex?.status_changed_at ?? nowIso),\n      rights_status: rightsStatus,\n      processing_started_at: null,\n      _components: { V: round(V, 3), O: round(O, 3), A: round(A, 3), E: round(E, 3), R: round(R, 3), P: round(P, 3) },\n    },\n  });\n}\n\nrows.sort((a, b) => b.json.trend_score - a.json.trend_score);\n\nconst runSummary = { ...summary, ...(batch0.stats ?? {}) };\nif (rows.length === 0) return [{ json: { _empty: true, _summary: runSummary } }];\nrows[0].json._summary = runSummary;\nreturn rows;\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Metrics + Trend Score (pure math) + state machine. Never touches rows owned by Factory/Publisher. New videos failing hard filters are not stored."
+    },
+    {
+      "id": "c1420896-3f1b-4670-acbe-ddb21a154a9e",
+      "name": "Has Rows",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        2420,
+        60
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "r1",
+              "leftValue": "={{ $json.candidate_key }}",
+              "operator": {
+                "operation": "notEmpty",
+                "singleValue": true,
+                "type": "string"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          }
+        },
+        "looseTypeValidation": true
+      },
+      "notes": "Drops the placeholder item when no candidate was produced."
+    },
+    {
+      "id": "b69a9ad1-ca6d-4a5a-8c70-0f7a9c1bfd40",
+      "name": "Upsert Candidates",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        60
+      ],
+      "parameters": {
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "candidate_key",
+              "id": "candidate_key",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "platform",
+              "id": "platform",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "content_id",
+              "id": "content_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "source_key",
+              "id": "source_key",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "discovered_via",
+              "id": "discovered_via",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "creator_id",
+              "id": "creator_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "creator_name",
+              "id": "creator_name",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "title",
+              "id": "title",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "url",
+              "id": "url",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "thumbnail_url",
+              "id": "thumbnail_url",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "category",
+              "id": "category",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "yt_category_id",
+              "id": "yt_category_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "pillar",
+              "id": "pillar",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "language",
+              "id": "language",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "license",
+              "id": "license",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "published_at",
+              "id": "published_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "first_seen_at",
+              "id": "first_seen_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "last_checked_at",
+              "id": "last_checked_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "duration_seconds",
+              "id": "duration_seconds",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "views",
+              "id": "views",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "likes",
+              "id": "likes",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "comments",
+              "id": "comments",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "avg_views_hour",
+              "id": "avg_views_hour",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "velocity_views_hour",
+              "id": "velocity_views_hour",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "accel_ratio",
+              "id": "accel_ratio",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "engagement_rate",
+              "id": "engagement_rate",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "trend_score",
+              "id": "trend_score",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "peak_trend_score",
+              "id": "peak_trend_score",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "score_confidence",
+              "id": "score_confidence",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "snapshot_count",
+              "id": "snapshot_count",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prev_views",
+              "id": "prev_views",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prev_checked_at",
+              "id": "prev_checked_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "prev_velocity",
+              "id": "prev_velocity",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "source_priority",
+              "id": "source_priority",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "status",
+              "id": "status",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "status_reason",
+              "id": "status_reason",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "status_changed_at",
+              "id": "status_changed_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "rights_status",
+              "id": "rights_status",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "processing_started_at",
+              "id": "processing_started_at",
+              "required": false,
+              "type": "dateTime"
+            }
+          ],
+          "value": {
+            "accel_ratio": "={{ $json.accel_ratio }}",
+            "avg_views_hour": "={{ $json.avg_views_hour }}",
+            "candidate_key": "={{ $json.candidate_key }}",
+            "category": "={{ $json.category }}",
+            "comments": "={{ $json.comments }}",
+            "content_id": "={{ $json.content_id }}",
+            "creator_id": "={{ $json.creator_id }}",
+            "creator_name": "={{ $json.creator_name }}",
+            "discovered_via": "={{ $json.discovered_via }}",
+            "duration_seconds": "={{ $json.duration_seconds }}",
+            "engagement_rate": "={{ $json.engagement_rate }}",
+            "first_seen_at": "={{ $json.first_seen_at }}",
+            "language": "={{ $json.language }}",
+            "last_checked_at": "={{ $json.last_checked_at }}",
+            "license": "={{ $json.license }}",
+            "likes": "={{ $json.likes }}",
+            "peak_trend_score": "={{ $json.peak_trend_score }}",
+            "pillar": "={{ $json.pillar }}",
+            "platform": "={{ $json.platform }}",
+            "prev_checked_at": "={{ $json.prev_checked_at }}",
+            "prev_velocity": "={{ $json.prev_velocity }}",
+            "prev_views": "={{ $json.prev_views }}",
+            "processing_started_at": "={{ $json.processing_started_at }}",
+            "published_at": "={{ $json.published_at }}",
+            "rights_status": "={{ $json.rights_status }}",
+            "score_confidence": "={{ $json.score_confidence }}",
+            "snapshot_count": "={{ $json.snapshot_count }}",
+            "source_key": "={{ $json.source_key }}",
+            "source_priority": "={{ $json.source_priority }}",
+            "status": "={{ $json.status }}",
+            "status_changed_at": "={{ $json.status_changed_at }}",
+            "status_reason": "={{ $json.status_reason }}",
+            "thumbnail_url": "={{ $json.thumbnail_url }}",
+            "title": "={{ $json.title }}",
+            "trend_score": "={{ $json.trend_score }}",
+            "url": "={{ $json.url }}",
+            "velocity_views_hour": "={{ $json.velocity_views_hour }}",
+            "views": "={{ $json.views }}",
+            "yt_category_id": "={{ $json.yt_category_id }}"
+          }
+        },
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_candidates",
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "candidate_key",
+              "keyValue": "={{ $json.candidate_key }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "operation": "upsert",
+        "resource": "row"
+      },
+      "notes": "Upsert by candidate_key (unique key youtube:<videoId>)."
+    },
+    {
+      "id": "94209802-bb0a-4964-a8d0-5b9a60548d48",
+      "name": "Insert Snapshots",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2860,
+        60
+      ],
+      "parameters": {
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "candidate_key",
+              "id": "candidate_key",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "run_id",
+              "id": "run_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "captured_at",
+              "id": "captured_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "views",
+              "id": "views",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "likes",
+              "id": "likes",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "comments",
+              "id": "comments",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "velocity_views_hour",
+              "id": "velocity_views_hour",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "trend_score",
+              "id": "trend_score",
+              "required": false,
+              "type": "number"
+            }
+          ],
+          "value": {
+            "candidate_key": "={{ $('Has Rows').item.json.candidate_key }}",
+            "captured_at": "={{ $('Has Rows').item.json.last_checked_at }}",
+            "comments": "={{ $('Has Rows').item.json.comments }}",
+            "likes": "={{ $('Has Rows').item.json.likes }}",
+            "run_id": "={{ $('Init Run').first().json.run_id }}",
+            "trend_score": "={{ $('Has Rows').item.json.trend_score }}",
+            "velocity_views_hour": "={{ $('Has Rows').item.json.velocity_views_hour }}",
+            "views": "={{ $('Has Rows').item.json.views }}"
+          }
+        },
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_snapshots",
+          "mode": "list",
+          "value": "aP8J4jvFf1erta8N"
+        },
+        "operation": "insert",
+        "options": {
+          "optimizeBulk": true
+        },
+        "resource": "row"
+      },
+      "notes": "One snapshot per candidate per run (history for velocity/acceleration and analytics)."
+    },
+    {
+      "id": "ca86ab3f-190b-4080-acaa-d4798782eefc",
+      "name": "Build Run Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Build Run Log — one row for viral_runs: counts, estimated quota and HTTP errors of this run.\n\nconst run = $('Init Run').first().json;\nconst s = $('Score & State').first().json._summary ?? {};\n\nconst safeAll = name => { try { return $(name).isExecuted ? $(name).all() : []; } catch (e) { return []; } };\nconst youtubeNodes = ['YT Resolve Handle', 'YT Uploads', 'YT Charts US', 'YT Video Details'];\nconst httpNodes = [...youtubeNodes, 'Twitch Users', 'Twitch Clips'];\nconst errors = [];\nlet quota = 0;\nfor (const n of httpNodes) {\n  const items = safeAll(n);\n  if (youtubeNodes.includes(n)) quota += items.length; // YouTube quota: 1 unit per request (page/batch)\n  for (const it of items) if (it.json?.error) errors.push(`${n}: ${String(it.json.error.message ?? it.json.error).slice(0, 150)}`);\n}\n\nconst notes = {\n  errors,\n  config_warnings: run.config_warnings ?? [],\n  reject_reasons: s.reject_reasons ?? {},\n  rejected_new: s.rejected_new ?? 0,\n  skipped_too_soon: s.skipped_too_soon ?? 0,\n  skipped_locked: s.skipped_locked ?? 0,\n};\n\nreturn [{\n  json: {\n    run_id: run.run_id,\n    workflow: run.workflow,\n    started_at: run.started_at,\n    finished_at: new Date().toISOString(),\n    status: errors.length ? 'PARTIAL' : 'SUCCESS',\n    sources_polled: safeAll('Build Watchlist Requests').length,\n    videos_fetched: s.videos_evaluated ?? 0,\n    new_candidates: s.new_candidates ?? 0,\n    updated_candidates: s.updated_candidates ?? 0,\n    eligible: s.eligible ?? 0,\n    expired: s.expired ?? 0,\n    rejected: s.rejected ?? 0,\n    quota_units_est: quota,\n    errors: JSON.stringify(notes).slice(0, 4000),\n  },\n}];\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "Counts, estimated quota, HTTP errors, config warnings."
+    },
+    {
+      "id": "d633da6b-cff3-4ea6-99ad-84ae098bb543",
+      "name": "Write Run Log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        300
+      ],
+      "parameters": {
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "run_id",
+              "id": "run_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "workflow",
+              "id": "workflow",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "started_at",
+              "id": "started_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "finished_at",
+              "id": "finished_at",
+              "required": false,
+              "type": "dateTime"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "status",
+              "id": "status",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "sources_polled",
+              "id": "sources_polled",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "videos_fetched",
+              "id": "videos_fetched",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "new_candidates",
+              "id": "new_candidates",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "updated_candidates",
+              "id": "updated_candidates",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "eligible",
+              "id": "eligible",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "expired",
+              "id": "expired",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "rejected",
+              "id": "rejected",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "quota_units_est",
+              "id": "quota_units_est",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "canBeUsedToMatch": true,
+              "defaultMatch": false,
+              "display": true,
+              "displayName": "errors",
+              "id": "errors",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "value": {
+            "eligible": "={{ $json.eligible }}",
+            "errors": "={{ $json.errors }}",
+            "expired": "={{ $json.expired }}",
+            "finished_at": "={{ $json.finished_at }}",
+            "new_candidates": "={{ $json.new_candidates }}",
+            "quota_units_est": "={{ $json.quota_units_est }}",
+            "rejected": "={{ $json.rejected }}",
+            "run_id": "={{ $json.run_id }}",
+            "sources_polled": "={{ $json.sources_polled }}",
+            "started_at": "={{ $json.started_at }}",
+            "status": "={{ $json.status }}",
+            "updated_candidates": "={{ $json.updated_candidates }}",
+            "videos_fetched": "={{ $json.videos_fetched }}",
+            "workflow": "={{ $json.workflow }}"
+          }
+        },
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_runs",
+          "mode": "list",
+          "value": "sZvqRG1Cg9nFH7lR"
+        },
+        "operation": "insert",
+        "resource": "row"
+      },
+      "notes": "One row per run in viral_runs."
+    },
+    {
+      "id": "654347ba-800f-4dae-ad41-3adcabed9501",
+      "name": "Prune Old Snapshots",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2860,
+        300
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_snapshots",
+          "mode": "list",
+          "value": "aP8J4jvFf1erta8N"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "lt",
+              "keyName": "captured_at",
+              "keyValue": "={{ $now.minus({ days: $('Init Run').first().json.config.snapshot_retention_days }).toISO() }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "operation": "deleteRows",
+        "resource": "row"
+      },
+      "notes": "Retention: deletes snapshots older than config.snapshot_retention_days. Runs every hour (cheap, usually 0 rows).",
+      "executeOnce": true
+    },
+    {
+      "id": "2a72004e-8524-400e-8c1a-034f04175523",
+      "name": "Get Twitch Sources",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        440
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_sources",
+          "mode": "list",
+          "value": "ULvhVxUCOHh4vjmO"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "isTrue",
+              "keyName": "active"
+            },
+            {
+              "condition": "eq",
+              "keyName": "platform",
+              "keyValue": "twitch"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "operation": "get",
+        "orderBy": true,
+        "orderByColumn": "priority",
+        "orderByDirection": "DESC",
+        "resource": "row",
+        "returnAll": true
+      },
+      "notes": "Active Twitch streamers from viral_sources (handle = Twitch login).",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "5927ea06-5543-42d9-95ad-9306c3c25120",
+      "name": "Twitch Users",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1980,
+        440
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Client-Id",
+              "value": "={{ $('Init Run').first().json.config.twitch_client_id }}"
+            }
+          ]
+        },
+        "method": "GET",
+        "options": {
+          "timeout": 15000
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "url": "={{ 'https://api.twitch.tv/helix/users?' + $('Get Twitch Sources').all().map(i => i.json.handle).filter(h => h).map(h => 'login=' + encodeURIComponent(String(h).replace('@', '').trim().toLowerCase())).join('&') }}"
+      },
+      "notes": "helix/users: login -> broadcaster id (one call for all streamers).",
+      "onError": "continueRegularOutput",
+      "executeOnce": true,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "DswAz64qW5Qx2eb8",
+          "name": "US VIRAL - Twitch API"
+        }
+      }
+    },
+    {
+      "id": "8cf43f41-cfbe-4e86-b394-03cfc505a7ce",
+      "name": "Build Clip Requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        440
+      ],
+      "parameters": {
+        "jsCode": "// Build Clip Requests — one Twitch API request per streamer (clips of the last N hours, most viewed first)\n// + refresh requests for Twitch candidates already tracked (WATCHING/ELIGIBLE), up to 100 ids per call.\n// Always returns at least one item so the chain reaches Score & State.\n\nconst run = $('Init Run').first().json;\nconst cfg = run.config;\n\nconst users = {};\ntry {\n  for (const it of $('Twitch Users').all()) for (const u of it.json?.data ?? []) users[u.login.toLowerCase()] = u;\n} catch (e) {\n  // Twitch Users did not run\n}\n\nconst since = new Date(run.started_at_ms - cfg.twitch_clip_window_h * 3600 * 1000).toISOString();\nconst out = [];\nconst unresolved = [];\n\nfor (const it of $('Get Twitch Sources').all()) {\n  const s = it.json ?? {};\n  if (!s.source_key) continue;\n  const login = String(s.handle ?? '').replace('@', '').trim().toLowerCase();\n  const u = users[login];\n  if (!u) { unresolved.push(login); continue; }\n  out.push({\n    json: {\n      kind: 'broadcaster',\n      source_key: s.source_key,\n      login,\n      broadcaster_id: u.id,\n      url: `https://api.twitch.tv/helix/clips?broadcaster_id=${u.id}&started_at=${encodeURIComponent(since)}&first=${cfg.twitch_clips_per_source}`,\n    },\n  });\n}\n\nconst tracked = $('Get Tracked Candidates').all().map(i => i.json ?? {})\n  .filter(r => r.platform === 'twitch' && r.content_id && ['WATCHING', 'ELIGIBLE'].includes(r.status));\nfor (let i = 0; i < tracked.length; i += 100) {\n  const ids = tracked.slice(i, i + 100).map(r => 'id=' + encodeURIComponent(r.content_id)).join('&');\n  out.push({ json: { kind: 'refresh', url: `https://api.twitch.tv/helix/clips?${ids}` } });\n}\n\nif (out.length === 0) out.push({ json: { kind: 'none', url: 'https://api.twitch.tv/helix/clips?id=none' } });\nout[0].json.unresolved_logins = unresolved;\nreturn out;\n",
+        "language": "javaScript",
+        "mode": "runOnceForAllItems"
+      },
+      "notes": "One clips request per streamer + refresh of tracked Twitch clips. Always >= 1 item."
+    },
+    {
+      "id": "a6c7d39b-db77-47ef-a938-54d4d015f7b5",
+      "name": "Twitch Clips",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2420,
+        440
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Client-Id",
+              "value": "={{ $('Init Run').first().json.config.twitch_client_id }}"
+            }
+          ]
+        },
+        "method": "GET",
+        "options": {
+          "timeout": 15000
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "url": "={{ $json.url }}"
+      },
+      "notes": "helix/clips: most viewed clips of the window, or refresh by id.",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "DswAz64qW5Qx2eb8",
+          "name": "US VIRAL - Twitch API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Init Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Run": {
+      "main": [
+        [
+          {
+            "node": "Get Active Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Sources": {
+      "main": [
+        [
+          {
+            "node": "Needs Channel ID",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Watchlist Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Channel ID": {
+      "main": [
+        [
+          {
+            "node": "YT Resolve Handle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YT Resolve Handle": {
+      "main": [
+        [
+          {
+            "node": "Map Resolved IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Resolved IDs": {
+      "main": [
+        [
+          {
+            "node": "Save Source IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Watchlist Requests": {
+      "main": [
+        [
+          {
+            "node": "YT Uploads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YT Uploads": {
+      "main": [
+        [
+          {
+            "node": "Get Tracked Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Tracked Candidates": {
+      "main": [
+        [
+          {
+            "node": "YT Charts US",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YT Charts US": {
+      "main": [
+        [
+          {
+            "node": "Build Video Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Video Batches": {
+      "main": [
+        [
+          {
+            "node": "YT Video Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score & State": {
+      "main": [
+        [
+          {
+            "node": "Has Rows",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Rows": {
+      "main": [
+        [
+          {
+            "node": "Upsert Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Candidates": {
+      "main": [
+        [
+          {
+            "node": "Insert Snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Run Log": {
+      "main": [
+        [
+          {
+            "node": "Write Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Run Log": {
+      "main": [
+        [
+          {
+            "node": "Prune Old Snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YT Video Details": {
+      "main": [
+        [
+          {
+            "node": "Get Twitch Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Twitch Sources": {
+      "main": [
+        [
+          {
+            "node": "Twitch Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Twitch Users": {
+      "main": [
+        [
+          {
+            "node": "Build Clip Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Clip Requests": {
+      "main": [
+        [
+          {
+            "node": "Twitch Clips",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Twitch Clips": {
+      "main": [
+        [
+          {
+            "node": "Score & State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 2 Hours :07": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timezone": "America/New_York",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 300,
+    "errorWorkflow": "LfLwNkCRfJgGmxUr"
+  },
+  "description": null,
+  "nodeGroups": [
+    {
+      "id": "5770b483-6c43-41ac-bfa5-4b894bf839c9",
+      "name": "Setup",
+      "nodeNames": [
+        "Load Config",
+        "Init Run"
+      ],
+      "description": "Load config and build run context"
+    },
+    {
+      "id": "e1c48e52-da01-4be3-afde-efec3d9d5be5",
+      "name": "Resolve Channel IDs",
+      "nodeNames": [
+        "Needs Channel ID",
+        "YT Resolve Handle",
+        "Map Resolved IDs",
+        "Save Source IDs"
+      ],
+      "description": "One-time @handle -> channel ID / uploads playlist for new sources"
+    },
+    {
+      "id": "7588875d-88bd-4719-ba7f-faa93d25865b",
+      "name": "Watchlist",
+      "nodeNames": [
+        "Build Watchlist Requests",
+        "YT Uploads"
+      ],
+      "description": "Latest uploads of each active creator"
+    },
+    {
+      "id": "12cf8b53-e124-4d19-a42b-e1f23417b7eb",
+      "name": "Tracked + Charts",
+      "nodeNames": [
+        "Get Tracked Candidates",
+        "YT Charts US"
+      ],
+      "description": "Existing candidates to refresh + YouTube mostPopular US"
+    },
+    {
+      "id": "e045adaa-5543-4f47-b89d-689804a02e64",
+      "name": "Video Details",
+      "nodeNames": [
+        "Build Video Batches",
+        "YT Video Details"
+      ],
+      "description": "Merge YouTube IDs and fetch stats (50 per call)"
+    },
+    {
+      "id": "fd65deea-2a7b-489d-a8a4-c8c7b86cf359",
+      "name": "Persist",
+      "nodeNames": [
+        "Has Rows",
+        "Upsert Candidates",
+        "Insert Snapshots"
+      ],
+      "description": "Upsert candidates + snapshot history"
+    },
+    {
+      "id": "822587e0-9cd0-4b89-98bd-da8135ec5fa1",
+      "name": "Run Log + Housekeeping",
+      "nodeNames": [
+        "Build Run Log",
+        "Write Run Log",
+        "Prune Old Snapshots"
+      ],
+      "description": "Run log row + snapshot retention"
+    },
+    {
+      "id": "5512942c-e753-4e6c-aa5b-86e1a97da12e",
+      "name": "Twitch Clips",
+      "nodeNames": [
+        "Get Twitch Sources",
+        "Twitch Users",
+        "Build Clip Requests",
+        "Twitch Clips"
+      ],
+      "description": "Streamers watchlist -> most viewed clips of the last 48h + refresh"
+    }
+  ],
+  "meta": {
+    "n8n_id": "TmGUP7rKwq2fPxqR",
+    "versionId": "455bf70f-fe09-4138-b4ec-9359b40c864e",
+    "active": true,
+    "exported_from_updatedAt": "2026-10-06T13:08:39.291Z"
+  }
+}

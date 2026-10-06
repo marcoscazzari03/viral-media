@@ -1,0 +1,3448 @@
+{
+  "name": "02 - US VIRAL | Reel Factory",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "expression": "37 */2 * * *",
+              "field": "cronExpression"
+            }
+          ]
+        }
+      },
+      "id": "c22d03a5-6d6c-4a36-8d7e-a82629556790",
+      "name": "Every 2 Hours :37",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "K9NPI0QIqVOkuHD1",
+          "cachedResultName": "viral_config"
+        },
+        "returnAll": true
+      },
+      "id": "b6e96493-b092-4783-85a9-8b456c131632",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Init Factory — run context + typed config for the Reel Factory (same viral_config table as Discovery).\n// Missing keys fall back to DEFAULTS, so deleting a row never breaks the run.\n\nconst DEFAULTS = {\n  factory_platforms: 'twitch',\n  factory_allowed_rights: 'ALLOWED,ALLOWED_CC,DISCOVERY_ONLY',\n  factory_max_reels_per_day: 3,\n  factory_ready_buffer_max: 3,\n  factory_creator_cooldown_h: 12,\n  eligible_score_min: 60,\n  eligible_max_age_h: 48,\n  twitch_eligible_max_age_h: 72,\n  tts_voice: 'am_adam',\n  tts_speed: 1.05,\n  media_worker_url: '',\n  factory_force_candidate_key: '',\n  llm_model: 'claude-opus-5-5',\n  llm_effort: 'medium',\n  ig_handle: '',\n  publish_max_per_day: 1,\n  factory_min_views: 250,\n  factory_full_captions_sources: '',\n  factory_text_style: 'meme',\n  factory_voice_ratio: 0.5,\n  factory_max_segment_s: 60,\n};\nconst LIST_KEYS = ['factory_platforms', 'factory_allowed_rights', 'factory_full_captions_sources'];\n\nconst warnings = [];\nconst config = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json;\n  const key = String(r.key ?? '').trim();\n  if (!(key in DEFAULTS)) continue; // Discovery keys are ignored here\n  const hasNum = r.value_number !== null && r.value_number !== undefined && Number.isFinite(Number(r.value_number));\n  const hasStr = typeof r.value_string === 'string' && r.value_string.trim() !== '';\n  if (typeof DEFAULTS[key] === 'number') {\n    const v = hasNum ? Number(r.value_number) : (hasStr ? Number(r.value_string) : NaN);\n    if (Number.isFinite(v)) config[key] = v;\n    else warnings.push(`key \"${key}\" has no valid number: default ${DEFAULTS[key]} used`);\n  } else if (hasStr) {\n    config[key] = r.value_string.trim();\n  }\n}\n\nfor (const key of LIST_KEYS) {\n  config[key] = String(config[key] ?? '').split(',').map(s => s.trim()).filter(Boolean);\n}\nconfig.factory_platforms = config.factory_platforms.map(s => s.toLowerCase());\nconfig.factory_allowed_rights = config.factory_allowed_rights.map(s => s.toUpperCase());\nconfig.media_worker_url = String(config.media_worker_url).replace(/\\/+$/, '');\nif (!config.media_worker_url) warnings.push('media_worker_url missing: rendering will fail');\nconfig.factory_text_style = config.factory_text_style === 'hook' ? 'hook' : 'meme';\nconfig.factory_voice_ratio = Math.min(1, Math.max(0, Number(config.factory_voice_ratio) || 0));\nconfig.factory_max_segment_s = Math.min(75, Math.max(15, Number(config.factory_max_segment_s) || 60));\n\nconst now = new Date();\nreturn [{\n  json: {\n    run_id: `fact-${$now.toFormat('yyyyMMdd-HHmm')}-${$execution.id}`,\n    workflow: '02 - US VIRAL | Reel Factory',\n    started_at: now.toISOString(),\n    started_at_ms: now.getTime(),\n    config_warnings: warnings,\n    config,\n  },\n}];\n"
+      },
+      "id": "23348479-75f4-45d5-8b5f-ddf70a99888b",
+      "name": "Init Factory",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "keyValue": "READY"
+            },
+            {
+              "keyName": "created_at",
+              "condition": "gte",
+              "keyValue": "={{ $now.minus({ hours: 48 }).toISO() }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "4e1a3ffa-64f2-4298-92a0-5d4025dcff91",
+      "name": "Get Recent Posts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        304
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "notes": "Posts of the last 48h + every READY post (daily cap, READY buffer, creator cooldown, no repeats)."
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_candidates",
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "keyValue": "ELIGIBLE"
+            },
+            {
+              "keyName": "candidate_key",
+              "keyValue": "={{ $('Init Factory').first().json.config.factory_force_candidate_key || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true,
+        "orderBy": true,
+        "orderByColumn": "trend_score"
+      },
+      "id": "6bd98624-e0a2-46db-99b5-75d700559da4",
+      "name": "Get Eligible",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        304
+      ],
+      "executeOnce": true,
+      "notes": "ELIGIBLE candidates from Discovery. 0 rows = nothing to do, the run stops here."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pick Candidate — decides whether to produce a Reel now and which ELIGIBLE candidate to use.\n// Pure rules, no AI:\n//  - stop if the daily cap or the READY buffer is reached;\n//  - keep only allowed platforms / rights, skip candidates already used in viral_posts;\n//  - skip creators used within the cooldown;\n//  - best trend_score wins (ties: newer first).\n// Returns 1 item (the pick) or 0 items (nothing to do: the chain stops silently).\n\nconst run = $('Init Factory').first().json;\nconst cfg = run.config;\nconst nowMs = run.started_at_ms;\n\nconst posts = $('Get Recent Posts').all().map(i => i.json ?? {}).filter(p => p.post_key);\nconst ageH = iso => (nowMs - Date.parse(iso ?? '')) / 3.6e6;\n\n// Test posts (forced by hand) never count toward the caps\nconst isTest = p => String(p.status_reason ?? '').startsWith('forced');\nconst last24 = posts.filter(p => !isTest(p) && ageH(p.created_at) <= 24 && !['FAILED', 'SKIPPED'].includes(p.status));\nconst ready = posts.filter(p => !isTest(p) && p.status === 'READY');\n// Produce at most what the Publisher can post (+1 spare): no Reels rendered just to go STALE\nconst dayCap = Math.min(cfg.factory_max_reels_per_day, cfg.publish_max_per_day + 1);\nconst bufferCap = Math.min(cfg.factory_ready_buffer_max, cfg.publish_max_per_day + 1);\nconst usedKeys = new Set(posts.map(p => p.candidate_key));\nconst recentCreators = new Set(\n  posts.filter(p => p.status !== 'FAILED' && ageH(p.created_at) <= cfg.factory_creator_cooldown_h)\n    .map(p => (p.creator_name ?? '').toLowerCase()),\n);\n\nconst stats = {\n  posts_last_24h: last24.length,\n  ready_buffer: ready.length,\n  eligible_total: 0,\n  skipped: { platform: 0, rights: 0, already_used: 0, creator_cooldown: 0, too_old: 0, low_views: 0 },\n};\n\n// Manual test override: viral_config.factory_force_candidate_key picks that candidate once (any status, no caps).\nconst force = cfg.factory_force_candidate_key;\n// Once used (or not found) it is ignored and the normal rules apply.\nconst forced = force && !usedKeys.has(force)\n  ? $input.all().map(i => i.json ?? {}).find(x => x.candidate_key === force)\n  : null;\nif (forced) {\n  return [{ json: { run_id: run.run_id, post_key: `post-${forced.platform}-${forced.content_id}`, candidate: forced, pick_reason: 'forced by factory_force_candidate_key', runner_up: null, stats } }];\n}\n\nif (last24.length >= dayCap) {\n  console.log(`daily cap reached (${last24.length}/${dayCap})`, stats);\n  return [];\n}\nif (ready.length >= bufferCap) {\n  console.log(`READY buffer full (${ready.length}/${bufferCap})`, stats);\n  return [];\n}\n\nconst pool = [];\nfor (const it of $input.all()) {\n  const c = it.json ?? {};\n  if (!c.candidate_key || c.status !== 'ELIGIBLE') continue;\n  stats.eligible_total++;\n  if (!cfg.factory_platforms.includes(String(c.platform).toLowerCase())) { stats.skipped.platform++; continue; }\n  if (!cfg.factory_allowed_rights.includes(String(c.rights_status).toUpperCase())) { stats.skipped.rights++; continue; }\n  if (usedKeys.has(c.candidate_key)) { stats.skipped.already_used++; continue; }\n  if (recentCreators.has((c.creator_name ?? '').toLowerCase())) { stats.skipped.creator_cooldown++; continue; }\n  const maxAgeH = c.platform === 'twitch' ? cfg.twitch_eligible_max_age_h : cfg.eligible_max_age_h;\n  if (ageH(c.published_at) > maxAgeH) { stats.skipped.too_old++; continue; }\n  if ((Number(c.views) || 0) < cfg.factory_min_views) { stats.skipped.low_views++; continue; }\n  pool.push(c);\n}\n\npool.sort((a, b) => (b.trend_score - a.trend_score) || (Date.parse(b.published_at) - Date.parse(a.published_at)));\nif (pool.length === 0) {\n  console.log('no usable ELIGIBLE candidate', stats);\n  return [];\n}\n\nconst pick = pool[0];\nreturn [{\n  json: {\n    run_id: run.run_id,\n    post_key: `post-${pick.platform}-${pick.content_id}`,\n    candidate: pick,\n    pick_reason: `best of ${pool.length} usable (score ${pick.trend_score})`,\n    runner_up: pool[1] ? { candidate_key: pool[1].candidate_key, trend_score: pool[1].trend_score } : null,\n    stats,\n  },\n}];\n"
+      },
+      "id": "12e71c5a-1278-4edc-9479-3c69e8719587",
+      "name": "Pick Candidate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        304
+      ],
+      "notes": "Daily cap, READY buffer, creator cooldown, best trend_score. 0 items = nothing to do."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Init Factory').first().json.config.media_worker_url }}/jobs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'transcribe', params: { source_url: $json.candidate.url, language: 'en' }, ref: $json.post_key }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "d43c178c-36dd-4eed-b832-b693dcd7e390",
+      "name": "Submit Transcribe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1328,
+        304
+      ],
+      "notes": "Async job on the media worker: download audio + whisper word timestamps. Fails here = nothing locked.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "bSneigiX43H3KJPA",
+          "name": "US VIRAL - Media Worker"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_candidates",
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $('Pick Candidate').first().json.candidate.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "processing_started_at": "={{ $now.toISO() }}",
+            "status": "PROCESSING",
+            "status_changed_at": "={{ $now.toISO() }}",
+            "status_reason": "={{ 'factory ' + $('Pick Candidate').first().json.run_id }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "00fb67b1-7510-4d5d-a046-2cb75e653377",
+      "name": "Lock Candidate",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1552,
+        304
+      ],
+      "notes": "PROCESSING = owned by the Factory, Discovery stops touching it."
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_posts",
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "attempts": 1,
+            "candidate_key": "={{ $('Pick Candidate').first().json.candidate.candidate_key }}",
+            "content_id": "={{ $('Pick Candidate').first().json.candidate.content_id }}",
+            "created_at": "={{ $now.toISO() }}",
+            "creator_name": "={{ $('Pick Candidate').first().json.candidate.creator_name }}",
+            "pillar": "={{ $('Pick Candidate').first().json.candidate.pillar }}",
+            "platform": "={{ $('Pick Candidate').first().json.candidate.platform }}",
+            "post_key": "={{ $('Pick Candidate').first().json.post_key }}",
+            "source_key": "={{ $('Pick Candidate').first().json.candidate.source_key }}",
+            "source_url": "={{ $('Pick Candidate').first().json.candidate.url }}",
+            "status": "TRANSCRIBING",
+            "status_reason": "={{ $('Pick Candidate').first().json.pick_reason }}",
+            "thumbnail_url": "={{ $('Pick Candidate').first().json.candidate.thumbnail_url }}",
+            "title": "={{ $('Pick Candidate').first().json.candidate.title }}",
+            "transcribe_job_id": "={{ $('Submit Transcribe').first().json.id }}",
+            "trend_score": "={{ $('Pick Candidate').first().json.candidate.trend_score }}",
+            "updated_at": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "b8173a5a-1e5d-4d89-89bc-8c78eec1154b",
+      "name": "Create Post",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        304
+      ],
+      "notes": "One row per Reel: viral_posts tracks it until published."
+    },
+    {
+      "parameters": {
+        "amount": 15
+      },
+      "id": "c6590a50-edce-44b5-8d34-f9fd40786757",
+      "name": "Wait 15s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1984,
+        304
+      ],
+      "webhookId": "a2cc1c88-2578-4e85-a4e9-4811c950b614"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Init Factory').first().json.config.media_worker_url }}/jobs/{{ $('Submit Transcribe').first().json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "12d940cc-500f-4524-94e0-3bcf4d9c94cf",
+      "name": "Get Transcribe Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2208,
+        304
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "bSneigiX43H3KJPA",
+          "name": "US VIRAL - Media Worker"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "done"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "done"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status === 'failed' || ($json.error !== undefined && $json.status === undefined) }}",
+                    "operator": {
+                      "operation": "true",
+                      "singleValue": true,
+                      "type": "boolean"
+                    },
+                    "rightValue": ""
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "failed"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "still running"
+        }
+      },
+      "id": "29f86d63-6c61-4302-bf62-8598d8c43209",
+      "name": "Transcribe Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2432,
+        304
+      ],
+      "notes": "done -> save, failed -> mark FAILED, queued/running -> wait again (bounded by the 300s execution timeout)."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_posts",
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $('Pick Candidate').first().json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "TRANSCRIBED",
+            "transcript": "={{ ($json.result.text || '').slice(0, 6000) }}",
+            "updated_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "post_key",
+              "displayName": "post_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "candidate_key",
+              "displayName": "candidate_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "platform",
+              "displayName": "platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "content_id",
+              "displayName": "content_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source_key",
+              "displayName": "source_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "creator_name",
+              "displayName": "creator_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pillar",
+              "displayName": "pillar",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source_url",
+              "displayName": "source_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "thumbnail_url",
+              "displayName": "thumbnail_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "trend_score",
+              "displayName": "trend_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status_reason",
+              "displayName": "status_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "transcribe_job_id",
+              "displayName": "transcribe_job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "render_job_id",
+              "displayName": "render_job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "transcript",
+              "displayName": "transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "segment_start",
+              "displayName": "segment_start",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "segment_end",
+              "displayName": "segment_end",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "intro_script",
+              "displayName": "intro_script",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hook",
+              "displayName": "hook",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "caption",
+              "displayName": "caption",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hashtags",
+              "displayName": "hashtags",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "llm_model",
+              "displayName": "llm_model",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "llm_tokens",
+              "displayName": "llm_tokens",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "video_url",
+              "displayName": "video_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "cover_url",
+              "displayName": "cover_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "duration_s",
+              "displayName": "duration_s",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "attempts",
+              "displayName": "attempts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "scheduled_for",
+              "displayName": "scheduled_for",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ig_media_id",
+              "displayName": "ig_media_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ig_permalink",
+              "displayName": "ig_permalink",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "published_at",
+              "displayName": "published_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "f85abd32-9240-41f5-9305-56912b1a9de6",
+      "name": "Save Transcript",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_posts",
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $('Pick Candidate').first().json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "error": "={{ String($json.error?.message ?? $json.error ?? 'unknown').slice(0, 1000) }}",
+            "status": "FAILED",
+            "status_reason": "transcribe_failed",
+            "updated_at": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "43c80fc1-b616-40bd-9a5e-e2af52fb5266",
+      "name": "Mark Post Failed",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_candidates",
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $('Pick Candidate').first().json.candidate.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "status": "FAILED",
+            "status_changed_at": "={{ $now.toISO() }}",
+            "status_reason": "transcribe_failed"
+          }
+        },
+        "options": {}
+      },
+      "id": "205c5b0f-6a91-43fe-ad54-27305cd21adb",
+      "name": "Release Candidate",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2864,
+        448
+      ],
+      "notes": "FAILED: not owned by Discovery, never picked again."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build LLM Request — the ONE Claude call per Reel. Sends clip facts + timestamped transcript,\n// asks for strict JSON (segment, intro voice-over, hook, meme line, caption, hashtags, skip flag).\n\nconst run = $('Init Factory').first().json;\nconst cfg = run.config;\nconst pick = $('Pick Candidate').first().json;\nconst c = pick.candidate;\nconst tr = $('Get Transcribe Job').last().json.result ?? {};\nconst duration = Number(tr.duration) || Number(c.duration_seconds) || 0;\n\nconst lines = (tr.segments ?? [])\n  .map(s => `[${Number(s.start).toFixed(1)}-${Number(s.end).toFixed(1)}] ${String(s.text ?? '').trim()}`)\n  .join('\\n')\n  .slice(0, 6000);\n\nconst system = [\n  'You package viral clips for an English-language Instagram Reels page (US audience) about streamers, YouTubers and viral internet moments.',\n  'The Reel: the clip plays from the first frame with a short meme-style line above it for the whole video (or a big hook for the first seconds); sometimes our narrator speaks a short intro over its first seconds (original audio quieter underneath).',\n  'Our commentary must add context, not repeat the clip. Viewers decide in the first 2 seconds whether to keep watching.',\n  'Rules:',\n  `- segment_start/segment_end: seconds inside the clip, one continuous moment. Usually 12-30 seconds; up to ${cfg.factory_max_segment_s} seconds only when the build-up is part of the fun (a whole funny exchange, a story that pays off). Cut dead air, start right at the setup, end right after the payoff or the best reaction, never in the middle of a sentence (use the transcript timestamps). Use the whole clip only if every second earns its place.`,\n  '- intro_script: ONE sentence, 8-16 words (about 4 seconds spoken). Who it is and why this moment matters. Natural and punchy, no hashtags, no emojis, no questions, never invent facts not supported by the title or transcript.',\n  '- hook: max 6 words, creates curiosity without giving away the payoff, specific to this clip (name the streamer when it helps), no emojis, no quotes, never misleading or clickbait about something that does not happen.',\n  '- meme_caption: 2-6 words shown above the clip for the whole video, like a TikTok/Instagram meme page overlay: an ironic, relatable reaction that frames how to watch it, not a description and not a spoiler. Mostly lowercase, casual internet English, no emojis, no hashtags, no quotes. Style examples (do not copy): \"grown men btw\", \"1% scary 99% funny\", \"he was NOT ready\", \"chat saw everything\", \"bro thought he had it\".',\n  '- emphasis_at: the second (in the clip timeline, between segment_start and segment_end) of the single strongest moment: the punchline, reaction or payoff. A punch zoom is placed there.',\n  '- caption: Instagram caption, 1-3 short lines, ends with a question that invites comments, at most 2 emojis, no hashtags, no links.',\n  '- hashtags: 5-8 relevant tags, lowercase, letters/numbers only, without #.',\n  '- skip=true (with a short skip_reason) if the clip is unusable: no understandable moment, mostly silence or music, sexual content, hate speech or slurs as the point of the clip, minors at risk, doxxing, real violence. Otherwise skip=false and skip_reason=\"\".',\n].join('\\n');\n\nconst user = [\n  `Creator: ${c.creator_name} (Twitch)`,\n  `Clip title: ${c.title}`,\n  `Clip created: ${c.published_at} | views: ${c.views} | duration: ${duration.toFixed(1)}s`,\n  'Transcript with timestamps (seconds):',\n  lines || '(no speech detected)',\n].join('\\n');\n\nconst schema = {\n  type: 'object',\n  additionalProperties: false,\n  required: ['skip', 'skip_reason', 'segment_start', 'segment_end', 'emphasis_at', 'intro_script', 'hook', 'meme_caption', 'caption', 'hashtags'],\n  properties: {\n    skip: { type: 'boolean' },\n    skip_reason: { type: 'string' },\n    segment_start: { type: 'number' },\n    segment_end: { type: 'number' },\n    emphasis_at: { type: 'number' },\n    intro_script: { type: 'string' },\n    hook: { type: 'string' },\n    meme_caption: { type: 'string' },\n    caption: { type: 'string' },\n    hashtags: { type: 'array', items: { type: 'string' } },\n  },\n};\n\n// Claude Messages API: structured output (output_config.format) guarantees schema-valid JSON;\n// thinking stays on (adaptive) and effort sets its depth. fallbacks: \"default\" re-runs a declined\n// request on Anthropic's recommended fallback model instead of returning a refusal.\nreturn [{\n  json: {\n    duration,\n    body: {\n      model: cfg.llm_model,\n      max_tokens: 8000,\n      system,\n      messages: [{ role: 'user', content: user }],\n      output_config: { effort: cfg.llm_effort, format: { type: 'json_schema', schema } },\n      fallbacks: 'default',\n    },\n  },\n}];\n"
+      },
+      "id": "cfc8c61d-59f5-49f3-aaba-964d52a4e39a",
+      "name": "Build LLM Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2864,
+        208
+      ],
+      "notes": "The ONE model call per Reel: clip facts + timestamped transcript -> strict JSON schema."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Script — validates the model JSON and turns it into safe render inputs.\n// Never trusts the model blindly: segment clamped to the clip, text trimmed, hashtags cleaned.\n// Output: one item with `skip` true/false and the fields to store in viral_posts.\n\nconst cfg = $('Init Factory').first().json.config;\nconst pick = $('Pick Candidate').first().json;\nconst c = pick.candidate;\nconst req = $('Build LLM Request').first().json;\nconst res = $input.first().json;\nconst duration = req.duration || 30;\n\nconst clean = (s, max) => String(s ?? '').replace(/\\s+/g, ' ').trim().slice(0, max);\nconst tokens = res.usage ? (res.usage.input_tokens ?? 0) + (res.usage.output_tokens ?? 0) : null;\nconst out = { post_key: pick.post_key, candidate_id: c.id, llm_model: res.model ?? req.body.model, llm_tokens: tokens };\n\nif (res.error) {\n  return [{ json: { ...out, skip: true, skip_reason: `llm_error: ${clean(res.error.message ?? res.error, 200)}`, llm_failed: true } }];\n}\nif (res.stop_reason === 'refusal') {\n  return [{ json: { ...out, skip: true, skip_reason: `llm_refusal: ${clean(res.stop_details?.category ?? '', 60)}` } }];\n}\n\n// Thinking blocks come first; the JSON answer is the text block\nlet data;\ntry {\n  data = JSON.parse((res.content ?? []).find(b => b.type === 'text')?.text ?? '');\n} catch (e) {\n  return [{ json: { ...out, skip: true, skip_reason: 'llm_invalid_json', llm_failed: true } }];\n}\n\nif (data.skip) return [{ json: { ...out, skip: true, skip_reason: `llm_skip: ${clean(data.skip_reason, 200)}` } }];\n\n// Segment: inside the clip, at least 5s (else the whole clip), at most factory_max_segment_s\nlet start = Math.max(0, Number(data.segment_start) || 0);\nlet end = Math.min(duration, Number(data.segment_end) || duration);\nif (!(end - start >= 5)) { start = 0; end = duration; }\nif (end - start > cfg.factory_max_segment_s) end = start + cfg.factory_max_segment_s;\n\nconst hashtags = [...new Set((data.hashtags ?? [])\n  .map(h => String(h).toLowerCase().replace(/[^a-z0-9]/g, ''))\n  .filter(h => h.length >= 2 && h.length <= 30))].slice(0, 8);\n\n// Punch zoom: model gives clip time, the worker wants seconds from the segment start\nconst emph = Number(data.emphasis_at) - start;\nconst emphasisAt = Number.isFinite(emph) && emph >= 0.5 && emph <= end - start - 0.3 ? Math.round(emph * 10) / 10 : null;\n\nconst intro = clean(data.intro_script, 160);\nconst hook = clean(data.hook, 48).replace(/[\"“”]/g, '');\n// Meme line: plain text only (the render font has no colour emojis)\nconst meme = clean(String(data.meme_caption ?? '').replace(/[^\\p{L}\\p{N}\\s%.,!?'’&+\\-:\\/#@$]/gu, ''), 48).replace(/[\"“”]/g, '');\n// Style: meme line for the whole Reel (or hook), our voice on a share of the Reels (A/B test)\nconst textStyle = cfg.factory_text_style === 'meme' && meme ? 'meme' : 'hook';\nconst voice = Math.random() < cfg.factory_voice_ratio;\nconst credit = `twitch.tv/${String(c.source_key ?? '').replace(/^twitch:/, '') || c.creator_name}`;\nconst caption = [\n  clean(data.caption, 600),\n  '',\n  `🎥 ${c.creator_name} on Twitch`,\n  '',\n  hashtags.map(h => `#${h}`).join(' '),\n].join('\\n').trim();\n\nif (!intro || !hook) return [{ json: { ...out, skip: true, skip_reason: 'llm_empty_fields', llm_failed: true } }];\n\nreturn [{\n  json: {\n    ...out,\n    skip: false,\n    segment_start: Math.round(start * 10) / 10,\n    segment_end: Math.round(end * 10) / 10,\n    emphasis_at: emphasisAt,\n    intro_script: intro,\n    hook,\n    meme_caption: meme,\n    text_style: textStyle,\n    voice,\n    style_variant: `${textStyle}+${voice ? 'voice' : 'novoice'}`,\n    caption,\n    hashtags: hashtags.join(' '),\n    credit,\n  },\n}];\n"
+      },
+      "id": "5e65dfe3-6e8a-41f2-89e0-e435139efd1c",
+      "name": "Parse Script",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3312,
+        208
+      ],
+      "notes": "Validate model output: clamp segment, clean text and hashtags, build final caption + credit."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.skip }}",
+              "operator": {
+                "operation": "false",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "a089b656-8d5a-44d0-82ff-0f7e870c8042",
+      "name": "Script OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3520,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_posts",
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $('Pick Candidate').first().json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "caption": "={{ $json.caption }}",
+            "hashtags": "={{ $json.hashtags }}",
+            "hook": "={{ $json.hook }}",
+            "intro_script": "={{ $json.intro_script }}",
+            "llm_model": "={{ $json.llm_model }}",
+            "llm_tokens": "={{ $json.llm_tokens }}",
+            "segment_end": "={{ $json.segment_end }}",
+            "segment_start": "={{ $json.segment_start }}",
+            "status": "SCRIPTED",
+            "updated_at": "={{ $now.toISO() }}",
+            "meme_caption": "={{ $json.meme_caption }}",
+            "style_variant": "={{ $json.style_variant }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "1c2212f2-76c7-437f-bdc8-5a9873abc51d",
+      "name": "Save Script",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3744,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_posts",
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $('Pick Candidate').first().json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "llm_model": "={{ $json.llm_model }}",
+            "llm_tokens": "={{ $json.llm_tokens }}",
+            "status": "={{ $json.llm_failed ? 'FAILED' : 'SKIPPED' }}",
+            "status_reason": "={{ $json.skip_reason }}",
+            "updated_at": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "5a5e9126-9c19-4285-8e38-57e0049559bb",
+      "name": "Mark Skipped",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3744,
+        320
+      ],
+      "notes": "SKIPPED = model judged the clip unusable; FAILED = API/JSON error."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_candidates",
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $('Pick Candidate').first().json.candidate.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "status": "={{ $('Parse Script').first().json.llm_failed ? 'FAILED' : 'REJECTED' }}",
+            "status_changed_at": "={{ $now.toISO() }}",
+            "status_reason": "={{ $('Parse Script').first().json.skip_reason }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "d56ff0c7-131b-460e-9274-e6ebe30557b6",
+      "name": "Reject Candidate",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3968,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "anthropic-beta",
+              "value": "server-side-fallback-2026-07-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "619b2fa4-9108-4955-9404-18ff7381148d",
+      "name": "Claude Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        3088,
+        208
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Claude Messages API, structured JSON output (output_config.format). Model/effort from viral_config.",
+      "credentials": {
+        "anthropicApi": {
+          "id": "LyaIAvxLwaL5YMIO",
+          "name": "US VIRAL - Anthropic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Init Factory').first().json.config.media_worker_url }}/jobs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'render', ref: $('Pick Candidate').first().json.post_key, params: { clip: { url: $('Pick Candidate').first().json.candidate.url, start: $('Parse Script').first().json.segment_start, end: $('Parse Script').first().json.segment_end }, intro: $('Parse Script').first().json.voice ? { text: $('Parse Script').first().json.intro_script, voice: $('Init Factory').first().json.config.tts_voice, speed: $('Init Factory').first().json.config.tts_speed, engine: 'kokoro' } : undefined, hook: $('Parse Script').first().json.text_style === 'hook' ? $('Parse Script').first().json.hook : '', top_text: $('Parse Script').first().json.text_style === 'meme' ? $('Parse Script').first().json.meme_caption : '', hook_seconds: 2.5, emphasis_at: $('Parse Script').first().json.emphasis_at, credit: $('Parse Script').first().json.credit, watermark: $('Init Factory').first().json.config.ig_handle, captions: $('Get Source').first().json.has_burned_captions === true ? 'intro_only' : (($('Init Factory').first().json.config.factory_full_captions_sources.includes($('Pick Candidate').first().json.candidate.source_key) || !$('Parse Script').first().json.voice) ? true : 'intro_only') } }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "ec9f8f01-ac90-43b9-a1eb-9786ea738182",
+      "name": "Submit Render",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        3968,
+        112
+      ],
+      "notes": "Clip-mode render: segment + Kokoro intro voice + captions + hook + credit (+ watermark).",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "bSneigiX43H3KJPA",
+          "name": "US VIRAL - Media Worker"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_posts",
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $('Pick Candidate').first().json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "render_job_id": "={{ $('Submit Render').first().json.id }}",
+            "status": "RENDERING",
+            "updated_at": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "9dd9e10a-663a-4042-8fd2-d18e646f42aa",
+      "name": "Mark Rendering",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        4192,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 20
+      },
+      "id": "859e030f-deb9-446a-bcef-7c204d71b99a",
+      "name": "Wait 20s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4400,
+        112
+      ],
+      "webhookId": "e50e6926-75b2-4b8f-9101-ce361b149eae"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Init Factory').first().json.config.media_worker_url }}/jobs/{{ $('Submit Render').first().json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "9d2f0bc4-804b-4be2-ba9d-4608765c00d6",
+      "name": "Get Render Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        4624,
+        112
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "bSneigiX43H3KJPA",
+          "name": "US VIRAL - Media Worker"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "done"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "done"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status === 'failed' || ($json.error !== undefined && $json.status === undefined) }}",
+                    "operator": {
+                      "operation": "true",
+                      "singleValue": true,
+                      "type": "boolean"
+                    },
+                    "rightValue": ""
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "failed"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "still running"
+        }
+      },
+      "id": "1d6f60f1-a1f8-4ff9-886c-c060452f1b12",
+      "name": "Render Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        4848,
+        112
+      ],
+      "notes": "done -> READY, failed -> FAILED, queued/running -> wait again."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_posts",
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $('Pick Candidate').first().json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cover_url": "={{ $json.result.cover_url }}",
+            "duration_s": "={{ $json.result.duration }}",
+            "status": "READY",
+            "updated_at": "={{ $now.toISO() }}",
+            "video_url": "={{ $json.result.video_url }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "post_key",
+              "displayName": "post_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "candidate_key",
+              "displayName": "candidate_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "platform",
+              "displayName": "platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "content_id",
+              "displayName": "content_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source_key",
+              "displayName": "source_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "creator_name",
+              "displayName": "creator_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pillar",
+              "displayName": "pillar",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source_url",
+              "displayName": "source_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "thumbnail_url",
+              "displayName": "thumbnail_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "trend_score",
+              "displayName": "trend_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status_reason",
+              "displayName": "status_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "transcribe_job_id",
+              "displayName": "transcribe_job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "render_job_id",
+              "displayName": "render_job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "transcript",
+              "displayName": "transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "segment_start",
+              "displayName": "segment_start",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "segment_end",
+              "displayName": "segment_end",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "intro_script",
+              "displayName": "intro_script",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hook",
+              "displayName": "hook",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "caption",
+              "displayName": "caption",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hashtags",
+              "displayName": "hashtags",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "llm_model",
+              "displayName": "llm_model",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "llm_tokens",
+              "displayName": "llm_tokens",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "video_url",
+              "displayName": "video_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "cover_url",
+              "displayName": "cover_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "duration_s",
+              "displayName": "duration_s",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "attempts",
+              "displayName": "attempts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "scheduled_for",
+              "displayName": "scheduled_for",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ig_media_id",
+              "displayName": "ig_media_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ig_permalink",
+              "displayName": "ig_permalink",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "published_at",
+              "displayName": "published_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "e52d8307-96f0-4829-9024-50ce41646331",
+      "name": "Save Reel",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        5072,
+        0
+      ],
+      "notes": "READY = video on the worker, waiting for the Publisher."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_candidates",
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $('Pick Candidate').first().json.candidate.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "status": "READY",
+            "status_changed_at": "={{ $now.toISO() }}",
+            "status_reason": "={{ 'reel ' + $('Pick Candidate').first().json.post_key }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "1ee2af3e-fbff-4aaa-b1b7-56b754d05feb",
+      "name": "Candidate Done",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        5280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_posts",
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $('Pick Candidate').first().json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "error": "={{ String($json.error?.message ?? $json.error ?? 'unknown').slice(0, 1000) }}",
+            "status": "FAILED",
+            "status_reason": "render_failed",
+            "updated_at": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "fe89f8fe-7a8e-40f2-a427-a4fcdec42835",
+      "name": "Mark Render Failed",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        5072,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_candidates",
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyValue": "={{ $('Pick Candidate').first().json.candidate.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "status": "FAILED",
+            "status_changed_at": "={{ $now.toISO() }}",
+            "status_reason": "render_failed"
+          }
+        },
+        "options": {}
+      },
+      "id": "f0ad6653-62d4-47d3-b57b-acad6ed94dbf",
+      "name": "Fail Candidate",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        5280,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ Date.now() - $('Init Factory').first().json.started_at_ms < 230000 }}",
+              "operator": {
+                "operation": "true",
+                "singleValue": true,
+                "type": "boolean"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "e3758e8b-5b7c-4af3-9c27-9f1ca2a9b2e5",
+      "name": "Time Left?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5072,
+        336
+      ],
+      "notes": "n8n Cloud stops runs at 5 min: stop polling at ~4 min, the post stays RENDERING and is collected next hour."
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_posts",
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "keyValue": "RENDERING"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "01b0e9c6-52f5-4583-94fb-7f05282ad1f7",
+      "name": "Get Pending Renders",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        -256
+      ],
+      "notes": "Posts whose render outlived a previous run. 0 rows = branch stops."
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Init Factory').first().json.config.media_worker_url }}/jobs/{{ $json.render_job_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "420da758-3bb7-442e-b170-b2c2e896da68",
+      "name": "Check Render",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        -256
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "bSneigiX43H3KJPA",
+          "name": "US VIRAL - Media Worker"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect Result — one item per post still RENDERING: was its render finished in the meantime?\n// done -> READY, failed (or stuck for more than MAX_RENDER_MIN) -> FAILED, otherwise left as it is.\n// Renders can outlive a run (n8n Cloud stops executions after 5 min): this picks them up next hour.\n\nconst MAX_RENDER_MIN = 45;\nconst posts = $('Get Pending Renders').all();\n\nreturn $input.all().map((it, i) => {\n  const job = it.json ?? {};\n  const post = posts[i]?.json ?? {};\n  const ageMin = (Date.now() - Date.parse(post.updated_at ?? '')) / 60000;\n  let outcome = 'running';\n  let error = null;\n  if (job.status === 'done') outcome = 'done';\n  else if (job.status === 'failed') { outcome = 'failed'; error = job.error ?? 'render failed'; }\n  else if (ageMin > MAX_RENDER_MIN) {\n    outcome = 'failed';\n    error = job.status ? `render stuck in ${job.status} for ${Math.round(ageMin)} min` : `worker unreachable for ${Math.round(ageMin)} min`;\n  }\n  return {\n    json: {\n      post_key: post.post_key,\n      candidate_key: post.candidate_key,\n      outcome,\n      video_url: job.result?.video_url ?? null,\n      cover_url: job.result?.cover_url ?? null,\n      duration: job.result?.duration ?? null,\n      error: error ? String(error).slice(0, 1000) : null,\n    },\n  };\n});\n"
+      },
+      "id": "fc8d833f-bc6f-4bce-b9e0-725e3f7393fa",
+      "name": "Collect Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        -256
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.outcome }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "done"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "done"
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.outcome }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "failed"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "failed"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ef8f7f92-6d64-4e6a-9a59-9c8b4b7cb354",
+      "name": "Render Outcome",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1328,
+        -256
+      ],
+      "notes": "running = left as it is (checked again next run)."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_posts",
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cover_url": "={{ $json.cover_url }}",
+            "duration_s": "={{ $json.duration }}",
+            "status": "READY",
+            "updated_at": "={{ $now.toISO() }}",
+            "video_url": "={{ $json.video_url }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "post_key",
+              "displayName": "post_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "candidate_key",
+              "displayName": "candidate_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "platform",
+              "displayName": "platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "content_id",
+              "displayName": "content_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source_key",
+              "displayName": "source_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "creator_name",
+              "displayName": "creator_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pillar",
+              "displayName": "pillar",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source_url",
+              "displayName": "source_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "thumbnail_url",
+              "displayName": "thumbnail_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "trend_score",
+              "displayName": "trend_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status_reason",
+              "displayName": "status_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "transcribe_job_id",
+              "displayName": "transcribe_job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "render_job_id",
+              "displayName": "render_job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "transcript",
+              "displayName": "transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "segment_start",
+              "displayName": "segment_start",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "segment_end",
+              "displayName": "segment_end",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "intro_script",
+              "displayName": "intro_script",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hook",
+              "displayName": "hook",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "caption",
+              "displayName": "caption",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hashtags",
+              "displayName": "hashtags",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "llm_model",
+              "displayName": "llm_model",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "llm_tokens",
+              "displayName": "llm_tokens",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "video_url",
+              "displayName": "video_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "cover_url",
+              "displayName": "cover_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "duration_s",
+              "displayName": "duration_s",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "attempts",
+              "displayName": "attempts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "scheduled_for",
+              "displayName": "scheduled_for",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ig_media_id",
+              "displayName": "ig_media_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ig_permalink",
+              "displayName": "ig_permalink",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "published_at",
+              "displayName": "published_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "24c278b9-03f4-4f6f-88ab-5f31f2120b9a",
+      "name": "Collected Ready",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1552,
+        -352
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_candidates",
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "candidate_key",
+              "keyValue": "={{ $('Collect Result').item.json.candidate_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "READY",
+            "status_changed_at": "={{ $now.toISO() }}",
+            "status_reason": "={{ 'reel ' + $('Collect Result').item.json.post_key }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "candidate_key",
+              "displayName": "candidate_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "platform",
+              "displayName": "platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "content_id",
+              "displayName": "content_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source_key",
+              "displayName": "source_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "discovered_via",
+              "displayName": "discovered_via",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "creator_id",
+              "displayName": "creator_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "creator_name",
+              "displayName": "creator_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "thumbnail_url",
+              "displayName": "thumbnail_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "yt_category_id",
+              "displayName": "yt_category_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pillar",
+              "displayName": "pillar",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "language",
+              "displayName": "language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "license",
+              "displayName": "license",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "published_at",
+              "displayName": "published_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "first_seen_at",
+              "displayName": "first_seen_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_checked_at",
+              "displayName": "last_checked_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "duration_seconds",
+              "displayName": "duration_seconds",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "views",
+              "displayName": "views",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "likes",
+              "displayName": "likes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "comments",
+              "displayName": "comments",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "avg_views_hour",
+              "displayName": "avg_views_hour",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "velocity_views_hour",
+              "displayName": "velocity_views_hour",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "accel_ratio",
+              "displayName": "accel_ratio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "engagement_rate",
+              "displayName": "engagement_rate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "trend_score",
+              "displayName": "trend_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "peak_trend_score",
+              "displayName": "peak_trend_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "score_confidence",
+              "displayName": "score_confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "snapshot_count",
+              "displayName": "snapshot_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "prev_views",
+              "displayName": "prev_views",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "prev_checked_at",
+              "displayName": "prev_checked_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "prev_velocity",
+              "displayName": "prev_velocity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source_priority",
+              "displayName": "source_priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status_reason",
+              "displayName": "status_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status_changed_at",
+              "displayName": "status_changed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "rights_status",
+              "displayName": "rights_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "processing_started_at",
+              "displayName": "processing_started_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "27fa4e3e-3476-405f-921e-c0437d6da1dc",
+      "name": "Collected Candidate Ready",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        -352
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_posts",
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "error": "={{ $json.error }}",
+            "status": "FAILED",
+            "status_reason": "render_failed",
+            "updated_at": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "4ed3087b-ea27-4801-aa86-55f9a9cbf2b6",
+      "name": "Collected Failed",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1552,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_candidates",
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "candidate_key",
+              "keyValue": "={{ $('Collect Result').item.json.candidate_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "status": "FAILED",
+            "status_changed_at": "={{ $now.toISO() }}",
+            "status_reason": "render_failed"
+          }
+        },
+        "options": {}
+      },
+      "id": "0fbae0c7-1262-4738-8bdc-695b0ddc8f68",
+      "name": "Collected Candidate Failed",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        -144
+      ]
+    },
+    {
+      "id": "d8f7950f-3bbd-4f57-a38e-41f550378825",
+      "name": "Get Source",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3850,
+        -40
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "cachedResultName": "viral_sources",
+          "mode": "list",
+          "value": "ULvhVxUCOHh4vjmO"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "source_key",
+              "keyValue": "={{ $('Pick Candidate').first().json.candidate.source_key }}"
+            }
+          ]
+        },
+        "limit": 1,
+        "matchType": "allConditions",
+        "operation": "get",
+        "resource": "row",
+        "returnAll": false
+      },
+      "notes": "Streamer settings (has_burned_captions). Always outputs one item, even for sources not in the table.",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    }
+  ],
+  "connections": {
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Init Factory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Factory": {
+      "main": [
+        [
+          {
+            "node": "Get Recent Posts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Pending Renders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recent Posts": {
+      "main": [
+        [
+          {
+            "node": "Get Eligible",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Eligible": {
+      "main": [
+        [
+          {
+            "node": "Pick Candidate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Candidate": {
+      "main": [
+        [
+          {
+            "node": "Submit Transcribe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Transcribe": {
+      "main": [
+        [
+          {
+            "node": "Lock Candidate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Candidate": {
+      "main": [
+        [
+          {
+            "node": "Create Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Post": {
+      "main": [
+        [
+          {
+            "node": "Wait 15s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 15s": {
+      "main": [
+        [
+          {
+            "node": "Get Transcribe Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Transcribe Job": {
+      "main": [
+        [
+          {
+            "node": "Transcribe Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe Status": {
+      "main": [
+        [
+          {
+            "node": "Save Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Post Failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 15s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Post Failed": {
+      "main": [
+        [
+          {
+            "node": "Release Candidate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Transcript": {
+      "main": [
+        [
+          {
+            "node": "Build LLM Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Script": {
+      "main": [
+        [
+          {
+            "node": "Script OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Script OK?": {
+      "main": [
+        [
+          {
+            "node": "Save Script",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Skipped": {
+      "main": [
+        [
+          {
+            "node": "Reject Candidate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LLM Request": {
+      "main": [
+        [
+          {
+            "node": "Claude Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Script": {
+      "main": [
+        [
+          {
+            "node": "Parse Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Render": {
+      "main": [
+        [
+          {
+            "node": "Mark Rendering",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Rendering": {
+      "main": [
+        [
+          {
+            "node": "Wait 20s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 20s": {
+      "main": [
+        [
+          {
+            "node": "Get Render Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Render Job": {
+      "main": [
+        [
+          {
+            "node": "Render Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Status": {
+      "main": [
+        [
+          {
+            "node": "Save Reel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Render Failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Time Left?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Reel": {
+      "main": [
+        [
+          {
+            "node": "Candidate Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Render Failed": {
+      "main": [
+        [
+          {
+            "node": "Fail Candidate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Time Left?": {
+      "main": [
+        [
+          {
+            "node": "Wait 20s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Renders": {
+      "main": [
+        [
+          {
+            "node": "Check Render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Render": {
+      "main": [
+        [
+          {
+            "node": "Collect Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Result": {
+      "main": [
+        [
+          {
+            "node": "Render Outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Outcome": {
+      "main": [
+        [
+          {
+            "node": "Collected Ready",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Collected Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collected Ready": {
+      "main": [
+        [
+          {
+            "node": "Collected Candidate Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collected Failed": {
+      "main": [
+        [
+          {
+            "node": "Collected Candidate Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Script": {
+      "main": [
+        [
+          {
+            "node": "Get Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Source": {
+      "main": [
+        [
+          {
+            "node": "Submit Render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 2 Hours :37": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "LfLwNkCRfJgGmxUr",
+    "timezone": "America/New_York",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 300,
+    "binaryMode": "separate"
+  },
+  "description": "US VIRAL Reel Factory: picks the best ELIGIBLE candidate (caps, cooldown), then transcribe, 1 LLM call, render on the media worker.",
+  "nodeGroups": [
+    {
+      "id": "9d18ec10-33d8-4096-b6ad-12f889b4b139",
+      "name": "Setup",
+      "nodeNames": [
+        "Load Config",
+        "Init Factory"
+      ],
+      "description": "Read viral_config and build the Factory settings"
+    },
+    {
+      "id": "190588e5-d0a2-4df3-92e9-3a53648b0eb8",
+      "name": "Pick",
+      "nodeNames": [
+        "Get Recent Posts",
+        "Get Eligible",
+        "Pick Candidate"
+      ],
+      "description": "Caps + cooldown, then the best ELIGIBLE candidate (or stop)"
+    },
+    {
+      "id": "cea90eff-f51e-4d75-a7ae-70eea866bb54",
+      "name": "Start Job",
+      "nodeNames": [
+        "Submit Transcribe",
+        "Lock Candidate",
+        "Create Post"
+      ],
+      "description": "Ask the worker for a transcript, lock the candidate, create the viral_posts row"
+    },
+    {
+      "id": "acb07c07-cc13-4cdf-9dd8-856c7fe14bd9",
+      "name": "Poll Transcribe",
+      "nodeNames": [
+        "Wait 15s",
+        "Get Transcribe Job"
+      ],
+      "description": "Every 15s ask the worker if the transcript is ready"
+    },
+    {
+      "id": "dd157529-68dc-43ce-8243-f9df0a0450bd",
+      "name": "Transcribe Failed",
+      "nodeNames": [
+        "Mark Post Failed",
+        "Release Candidate"
+      ],
+      "description": "Post FAILED + candidate FAILED (never picked again)"
+    },
+    {
+      "id": "9528dcec-d092-472a-9d93-26defeeecdbc",
+      "name": "Skipped",
+      "nodeNames": [
+        "Mark Skipped",
+        "Reject Candidate"
+      ],
+      "description": "Clip unusable or LLM error: post SKIPPED/FAILED, candidate REJECTED/FAILED"
+    },
+    {
+      "id": "296fa12d-6309-405f-8e0e-225ffa04bef0",
+      "name": "Script",
+      "nodeNames": [
+        "Save Transcript",
+        "Build LLM Request",
+        "Claude Script",
+        "Parse Script",
+        "Script OK?"
+      ],
+      "description": "Save transcript, then the ONE Claude call per Reel (JSON), validated before use"
+    },
+    {
+      "id": "a0cec2a4-cb53-4cc2-8c8d-4121c593a8a9",
+      "name": "Start Render",
+      "nodeNames": [
+        "Save Script",
+        "Get Source",
+        "Submit Render",
+        "Mark Rendering"
+      ],
+      "description": "Streamer settings, then send segment + intro + hook + credit to the worker, mark the post RENDERING"
+    },
+    {
+      "id": "4062207b-edd4-4ff3-a3ce-98c5903f20b8",
+      "name": "Poll Render",
+      "nodeNames": [
+        "Wait 20s",
+        "Get Render Job"
+      ],
+      "description": "Every 20s ask the worker if the Reel is rendered"
+    },
+    {
+      "id": "148b2a4c-3be9-48f6-8242-9e0d9bdc783a",
+      "name": "Reel Ready",
+      "nodeNames": [
+        "Save Reel",
+        "Candidate Done"
+      ],
+      "description": "Post READY with video_url/cover_url, candidate READY"
+    },
+    {
+      "id": "7862be9f-5709-4ad1-8c8a-effdf775056e",
+      "name": "Render Failed",
+      "nodeNames": [
+        "Mark Render Failed",
+        "Fail Candidate"
+      ],
+      "description": "Post FAILED with the worker error, candidate FAILED"
+    },
+    {
+      "id": "e1393082-8da3-404c-aaa6-5a2e4fe28404",
+      "name": "Collect Renders",
+      "nodeNames": [
+        "Get Pending Renders",
+        "Check Render",
+        "Collect Result",
+        "Render Outcome"
+      ],
+      "description": "Renders that outlived a previous run: check the worker, READY / FAILED / still running"
+    },
+    {
+      "id": "f09d72cb-8648-45b6-a474-0376ca8ec7b8",
+      "name": "Collected Ready",
+      "nodeNames": [
+        "Collected Ready",
+        "Collected Candidate Ready"
+      ],
+      "description": "Post READY + candidate READY"
+    },
+    {
+      "id": "adff4f28-bfa5-426b-9a93-16c189f05005",
+      "name": "Collected Failed",
+      "nodeNames": [
+        "Collected Failed",
+        "Collected Candidate Failed"
+      ],
+      "description": "Post FAILED + candidate FAILED"
+    }
+  ],
+  "meta": {
+    "n8n_id": "3jk53Pe81YwJJdbS",
+    "versionId": "a322de78-97bd-4260-b286-9dd88ea97528",
+    "active": true,
+    "exported_from_updatedAt": "2026-10-06T13:08:44.168Z"
+  }
+}

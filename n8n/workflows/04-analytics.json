@@ -1,0 +1,629 @@
+{
+  "name": "04 - US VIRAL | Analytics",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "expression": "25 */6 * * *",
+              "field": "cronExpression"
+            }
+          ]
+        }
+      },
+      "id": "437ddbc6-818f-4615-9a07-45156cc46915",
+      "name": "Every 6 Hours :25",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "K9NPI0QIqVOkuHD1",
+          "cachedResultName": "viral_config"
+        },
+        "returnAll": true
+      },
+      "id": "39c36513-c985-4025-abdf-22f281715b23",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Init Analytics — run context + typed config (viral_config). Missing keys fall back to DEFAULTS.\n\nconst DEFAULTS = {\n  ig_user_id: '',\n  ig_api_version: 'v23.0',\n  analytics_track_days: 7,\n  ig_reel_metrics: 'views,reach,likes,comments,shares,saved,total_interactions,ig_reels_avg_watch_time,ig_reels_video_view_total_time',\n};\n\nconst config = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json;\n  const key = String(r.key ?? '').trim();\n  if (!(key in DEFAULTS)) continue;\n  const hasNum = r.value_number !== null && r.value_number !== undefined && Number.isFinite(Number(r.value_number));\n  const hasStr = typeof r.value_string === 'string' && r.value_string.trim() !== '';\n  if (typeof DEFAULTS[key] === 'number') { if (hasNum) config[key] = Number(r.value_number); }\n  else if (hasStr) config[key] = r.value_string.trim();\n}\nconfig.ig_reel_metrics = config.ig_reel_metrics.split(',').map(s => s.trim()).filter(Boolean).join(',');\n\nreturn [{\n  json: {\n    run_id: `ana-${$now.toFormat('yyyyMMdd-HHmm')}-${$execution.id}`,\n    started_at: new Date().toISOString(),\n    graph: `https://graph.instagram.com/${config.ig_api_version}`,\n    config,\n  },\n}];\n"
+      },
+      "id": "42fe4581-95dc-4c78-85e2-c07e04a146da",
+      "name": "Init Analytics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Init Analytics').first().json.graph }}/{{ $('Init Analytics').first().json.config.ig_user_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "followers_count,media_count"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "5874ba73-6695-4d83-9292-7f0de6b721b1",
+      "name": "Account Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        672,
+        128
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "xBiS6L2qpWSWjdB0",
+          "name": "US VIRAL - Instagram"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.followers_count !== undefined }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "908d20d8-bf98-4592-89a7-984bf38c3392",
+      "name": "Account OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "vqjHMIflVZuF6DRf",
+          "cachedResultName": "viral_account_metrics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "captured_at": "={{ $now.toISO() }}",
+            "followers_count": "={{ $json.followers_count }}",
+            "media_count": "={{ $json.media_count }}",
+            "run_id": "={{ $('Init Analytics').first().json.run_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "captured_at",
+              "displayName": "captured_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "followers_count",
+              "displayName": "followers_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "media_count",
+              "displayName": "media_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "run_id",
+              "displayName": "run_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "29a1cda9-8112-484e-9446-f8cf8cb0c7e7",
+      "name": "Save Followers",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1104,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "keyValue": "PUBLISHED"
+            },
+            {
+              "keyName": "published_at",
+              "condition": "gte",
+              "keyValue": "={{ $now.minus({ days: $('Init Analytics').first().json.config.analytics_track_days }).toISO() }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "6aad9ba2-cfe9-4546-8cad-b4fe9c85e956",
+      "name": "Get Published",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        432
+      ],
+      "executeOnce": true,
+      "notes": "Reels published in the last analytics_track_days. 0 rows = nothing to measure."
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Init Analytics').first().json.graph }}/{{ $json.ig_media_id }}/insights",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "metric",
+              "value": "={{ $('Init Analytics').first().json.config.ig_reel_metrics }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "b0d162d4-680f-4f05-88ff-9246440b7224",
+      "name": "Get Insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        432
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "One call per Reel (lifetime totals).",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "xBiS6L2qpWSWjdB0",
+          "name": "US VIRAL - Instagram"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map Metrics — one snapshot row per Reel from its insights response.\n// Values come as data[].values[0].value (or total_value.value); missing metrics stay null.\n\nconst run = $('Init Analytics').first().json;\nconst posts = $('Get Published').all();\nconst num = v => (v === undefined || v === null || !Number.isFinite(Number(v)) ? null : Number(v));\nconst nowIso = new Date().toISOString();\n\nreturn $input.all().map((it, i) => {\n  const post = posts[i]?.json ?? {};\n  const res = it.json ?? {};\n  const m = {};\n  for (const d of res.data ?? []) m[d.name] = num(d.values?.[0]?.value ?? d.total_value?.value);\n  const ageH = (Date.now() - Date.parse(post.published_at)) / 3.6e6;\n  return {\n    json: {\n      post_key: post.post_key,\n      ig_media_id: post.ig_media_id,\n      source_key: post.source_key,\n      captured_at: nowIso,\n      age_h: Number.isFinite(ageH) ? Math.round(ageH * 10) / 10 : null,\n      views: m.views ?? null,\n      reach: m.reach ?? null,\n      likes: m.likes ?? null,\n      comments: m.comments ?? null,\n      shares: m.shares ?? null,\n      saved: m.saved ?? null,\n      total_interactions: m.total_interactions ?? null,\n      avg_watch_ms: m.ig_reels_avg_watch_time ?? null,\n      total_watch_ms: m.ig_reels_video_view_total_time ?? null,\n      run_id: run.run_id,\n      error: res.error ? String(res.error.message ?? res.error).slice(0, 300) : '',\n    },\n  };\n});\n"
+      },
+      "id": "5c7a7cdf-f9fd-49de-a300-779dfdfeaf15",
+      "name": "Map Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "00c450ca-acb9-48c8-8156-f53359a93d35",
+      "name": "Metrics OK",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        1328,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "9TnEU4uXAH0hvr1f",
+          "cachedResultName": "viral_post_metrics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "post_key": "={{ $json.post_key }}",
+            "ig_media_id": "={{ $json.ig_media_id }}",
+            "source_key": "={{ $json.source_key }}",
+            "captured_at": "={{ $json.captured_at }}",
+            "age_h": "={{ $json.age_h }}",
+            "views": "={{ $json.views }}",
+            "reach": "={{ $json.reach }}",
+            "likes": "={{ $json.likes }}",
+            "comments": "={{ $json.comments }}",
+            "shares": "={{ $json.shares }}",
+            "saved": "={{ $json.saved }}",
+            "total_interactions": "={{ $json.total_interactions }}",
+            "avg_watch_ms": "={{ $json.avg_watch_ms }}",
+            "total_watch_ms": "={{ $json.total_watch_ms }}",
+            "run_id": "={{ $json.run_id }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "b753732e-d24f-49c2-8a7f-2fc063b9dd9b",
+      "name": "Save Snapshot",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1552,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "last_views": "={{ $json.views }}",
+            "last_likes": "={{ $json.likes }}",
+            "last_shares": "={{ $json.shares }}",
+            "last_avg_watch_ms": "={{ $json.avg_watch_ms }}",
+            "last_metrics_at": "={{ $json.captured_at }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "0fa46b17-eabb-498b-bbd9-eba7f5858527",
+      "name": "Update Post",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1552,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Run Log — one row for viral_runs: Reels measured and insights errors of this run.\n\nconst run = $('Init Analytics').first().json;\nconst rows = $('Map Metrics').all().map(i => i.json);\nconst errors = rows.filter(r => r.error).map(r => `${r.post_key}: ${r.error}`);\nconst account = $('Account Info').first().json;\nif (account.error) errors.push(`account: ${String(account.error.message ?? account.error).slice(0, 200)}`);\n\nreturn [{\n  json: {\n    run_id: run.run_id,\n    workflow: '04 - US VIRAL | Analytics',\n    started_at: run.started_at,\n    finished_at: new Date().toISOString(),\n    status: errors.length ? 'PARTIAL' : 'SUCCESS',\n    videos_fetched: rows.length,\n    errors: JSON.stringify({ errors, followers: account.followers_count ?? null }).slice(0, 4000),\n  },\n}];\n"
+      },
+      "id": "479001dd-0c3a-4329-8afe-cb7eb938bbc4",
+      "name": "Build Run Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        624
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "sZvqRG1Cg9nFH7lR",
+          "cachedResultName": "viral_runs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "run_id": "={{ $json.run_id }}",
+            "workflow": "={{ $json.workflow }}",
+            "started_at": "={{ $json.started_at }}",
+            "finished_at": "={{ $json.finished_at }}",
+            "status": "={{ $json.status }}",
+            "videos_fetched": "={{ $json.videos_fetched }}",
+            "errors": "={{ $json.errors }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "0f56fe6a-cf02-4361-82a3-92acda62abc5",
+      "name": "Write Run Log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1984,
+        624
+      ]
+    }
+  ],
+  "connections": {
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Init Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Analytics": {
+      "main": [
+        [
+          {
+            "node": "Account Info",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Account Info": {
+      "main": [
+        [
+          {
+            "node": "Account OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Account OK?": {
+      "main": [
+        [
+          {
+            "node": "Save Followers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Published": {
+      "main": [
+        [
+          {
+            "node": "Get Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Insights": {
+      "main": [
+        [
+          {
+            "node": "Map Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Metrics": {
+      "main": [
+        [
+          {
+            "node": "Metrics OK",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Metrics OK": {
+      "main": [
+        [
+          {
+            "node": "Save Snapshot",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Run Log": {
+      "main": [
+        [
+          {
+            "node": "Write Run Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 6 Hours :25": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "LfLwNkCRfJgGmxUr",
+    "timezone": "America/New_York",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 300,
+    "binaryMode": "separate"
+  },
+  "description": "US VIRAL Analytics: every 6h snapshots Instagram insights of Reels published in the last 7 days (viral_post_metrics) and followers (viral_account_metrics); updates last_* in viral_posts.",
+  "nodeGroups": [
+    {
+      "id": "831f66f2-dbf5-49f5-aa62-57251cdf55bb",
+      "name": "Setup",
+      "nodeNames": [
+        "Load Config",
+        "Init Analytics"
+      ],
+      "description": "Read viral_config, Graph API base"
+    },
+    {
+      "id": "d40c94bc-f216-4192-ad2c-131a636af947",
+      "name": "Followers",
+      "nodeNames": [
+        "Account Info",
+        "Account OK?",
+        "Save Followers"
+      ],
+      "description": "Followers + media count snapshot"
+    },
+    {
+      "id": "402f3b50-6d4c-422d-8995-e5f841cb3469",
+      "name": "Reel Insights",
+      "nodeNames": [
+        "Get Published",
+        "Get Insights",
+        "Map Metrics"
+      ],
+      "description": "Lifetime insights of every Reel published in the last N days"
+    },
+    {
+      "id": "a52d7692-1693-476a-95a6-8c4e02dc0a69",
+      "name": "Run Log",
+      "nodeNames": [
+        "Build Run Log",
+        "Write Run Log"
+      ],
+      "description": "One row in viral_runs per run"
+    }
+  ],
+  "meta": {
+    "n8n_id": "Jf31mCQLSoloGtx2",
+    "versionId": "fb5045a5-9cc2-4ca4-b584-f79951f91946",
+    "active": true,
+    "exported_from_updatedAt": "2026-10-06T13:08:49.521Z"
+  }
+}

@@ -1,0 +1,269 @@
+{
+  "name": "05 - US VIRAL | Daily Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 20,
+              "triggerAtMinute": 20
+            }
+          ]
+        }
+      },
+      "id": "01030107-f4e0-4b86-bf10-417920318e84",
+      "name": "Daily 20:20 NY",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "K9NPI0QIqVOkuHD1",
+          "cachedResultName": "viral_config"
+        },
+        "returnAll": true
+      },
+      "id": "a525c419-7ee4-4ccf-9189-e24efea28fca",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "returnAll": true
+      },
+      "id": "afa9f8ea-71f5-4ab1-891f-ef46a7b6b13f",
+      "name": "Get Posts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        0
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "notes": "All posts (small table): the report filters by New York day."
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ",
+          "cachedResultName": "viral_candidates"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "keyValue": "ELIGIBLE"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "f6a4597e-f60c-47a7-b658-b0cb6c03a167",
+      "name": "Get Eligible",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        0
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "sZvqRG1Cg9nFH7lR",
+          "cachedResultName": "viral_runs"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "keyValue": "ERROR"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "e0537a84-0235-439b-ac16-13c4c460fd7e",
+      "name": "Get Errors",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        0
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Report — daily Telegram summary (New York day). Pure rules, no AI.\n// Always one message: Reels published today; when fewer than publish_max_per_day, the likely reasons.\n\nconst cfgRows = $('Load Config').all().map(i => i.json ?? {});\nconst cfgVal = (key, def) => {\n  const r = cfgRows.find(x => x.key === key);\n  if (!r) return def;\n  if (r.value_number !== null && r.value_number !== undefined && r.value_number !== '') return Number(r.value_number);\n  return r.value_string ?? def;\n};\nconst maxPerDay = Number(cfgVal('publish_max_per_day', 1)) || 1;\nconst enabled = Number(cfgVal('publish_enabled', 0)) ? 1 : 0;\nconst minViews = Number(cfgVal('factory_min_views', 250)) || 0;\n\nconst tz = 'America/New_York';\nconst nyNow = $now.setZone(tz);\nconst today = nyNow.toFormat('yyyy-MM-dd');\nconst nyDate = iso => (iso ? DateTime.fromISO(String(iso)).setZone(tz).toFormat('yyyy-MM-dd') : '');\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst isTest = p => String(p.status_reason ?? '').startsWith('forced');\n\nconst posts = $('Get Posts').all().map(i => i.json ?? {}).filter(p => p.post_key);\nconst eligible = $('Get Eligible').all().map(i => i.json ?? {}).filter(c => c.candidate_key);\nconst errors = $('Get Errors').all().map(i => i.json ?? {})\n  .filter(r => r.run_id && Date.now() - Date.parse(r.started_at ?? '') <= 24 * 3.6e6);\n\nconst published = posts.filter(p => p.status === 'PUBLISHED' && nyDate(p.published_at) === today);\nconst ready = posts.filter(p => p.status === 'READY' && !isTest(p));\nconst madeToday = posts.filter(p => !isTest(p) && nyDate(p.created_at) === today);\nconst count = st => madeToday.filter(p => p.status === st).length;\nconst failedPub = posts.filter(p => p.status === 'PUBLISH_FAILED' && nyDate(p.updated_at) === today);\nconst staleToday = posts.filter(p => p.status === 'STALE' && nyDate(p.updated_at) === today);\nconst usable = eligible.filter(c => c.platform === 'twitch' && (Number(c.views) || 0) >= minViews);\n\nconst lines = [];\nconst ok = published.length >= maxPerDay;\nlines.push(`${published.length ? (ok ? '✅' : '🟡') : '⚠️'} <b>US VIRAL — ${nyNow.setLocale('it').toFormat('d LLL')}</b> (New York)`);\nlines.push(`Pubblicati oggi: <b>${published.length}/${maxPerDay}</b>`);\nfor (const p of published) lines.push(`• ${esc(p.creator_name)} — ${esc(p.title)}${p.ig_permalink ? `\\n  ${esc(p.ig_permalink)}` : ''}`);\nlines.push(`Pronti per i prossimi slot: ${ready.length}`);\n\nif (!ok) {\n  const why = [];\n  if (!enabled) why.push('publish_enabled = 0 (pubblicazione spenta)');\n  for (const p of failedPub) why.push(`pubblicazione fallita: ${esc(p.creator_name)} — ${esc(String(p.error ?? '').slice(0, 200))}`);\n  if (count('SKIPPED')) why.push(`Claude ha scartato ${count('SKIPPED')} clip`);\n  if (count('FAILED')) why.push(`${count('FAILED')} render/trascrizioni fallite`);\n  if (staleToday.length) why.push(`${staleToday.length} Reel scaduti (STALE) prima di uscire`);\n  if (!madeToday.length && !ready.length) {\n    why.push(usable.length\n      ? `${usable.length} clip idonee ma bloccate (creator già usato nelle ultime ore o già montate)`\n      : `nessuna clip Twitch idonea con almeno ${minViews} views`);\n  }\n  if (errors.length) why.push(`${errors.length} errori nei workflow nelle ultime 24h (vedi viral_runs)`);\n  if (!why.length) why.push('nessun problema trovato: probabilmente non c\\'era un Reel pronto all\\'ora degli slot');\n  lines.push('', '<b>Perché meno del previsto:</b>', ...why.map(w => `• ${w}`));\n}\nlines.push('', `Factory oggi: ${madeToday.length} avviati, ${count('READY') + count('PUBLISHED')} riusciti · clip idonee ora: ${eligible.length}`);\n\nreturn [{\n  json: {\n    ny_date: today,\n    published_today: published.length,\n    max_per_day: maxPerDay,\n    ready: ready.length,\n    eligible_now: eligible.length,\n    errors_24h: errors.length,\n    chat_id: String(cfgVal('telegram_chat_id', '')),\n    text: lines.join('\\n'),\n  },\n}];\n"
+      },
+      "id": "ae3152d7-981a-4cea-a109-84a458d62e78",
+      "name": "Build Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "cc571a8b-ce99-40c1-9832-e3dae4a30011",
+      "name": "Send Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1344,
+        0
+      ],
+      "webhookId": "72510548-e764-4589-84c7-2f72495c7780",
+      "credentials": {
+        "telegramApi": {
+          "id": "fwidLBAWY5ihOfTY",
+          "name": "US VIRAL - Telegram"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## US VIRAL Daily Report\nEvery day 20:20 New York (after the last slot): Telegram summary of the day.\nFewer Reels than publish_max_per_day -> likely reasons (publishing off, failed publish, Claude skips, failed renders, no eligible clips, workflow errors).",
+        "color": 5
+      },
+      "id": "c94da6da-ee23-49e2-9e62-7c11f8dabd03",
+      "name": "Sticky Note 87ecb663",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        592,
+        176
+      ]
+    }
+  ],
+  "connections": {
+    "Daily 20:20 NY": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Get Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Posts": {
+      "main": [
+        [
+          {
+            "node": "Get Eligible",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Eligible": {
+      "main": [
+        [
+          {
+            "node": "Get Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Errors": {
+      "main": [
+        [
+          {
+            "node": "Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report": {
+      "main": [
+        [
+          {
+            "node": "Send Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "LfLwNkCRfJgGmxUr",
+    "timezone": "America/New_York",
+    "saveManualExecutions": true,
+    "executionTimeout": 120,
+    "binaryMode": "separate"
+  },
+  "description": "US VIRAL daily report: every day 20:20 New York, Telegram summary of Reels published today; when fewer than publish_max_per_day, the likely reasons.",
+  "nodeGroups": [],
+  "meta": {
+    "n8n_id": "ZE7Vyj80KlCr23sK",
+    "versionId": "5cb2dfb1-86ca-45cc-863d-5638f345dcaa",
+    "active": true,
+    "exported_from_updatedAt": "2026-10-06T07:43:42.763Z"
+  }
+}

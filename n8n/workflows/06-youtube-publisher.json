@@ -1,0 +1,478 @@
+{
+  "name": "06 - US VIRAL | YouTube Publisher",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "expression": "20 12,16,20 * * *",
+              "field": "cronExpression"
+            }
+          ]
+        }
+      },
+      "id": "6a65bcd9-a76d-4049-a9b7-fb0f4c4567b2",
+      "name": "After Slots 12-16-20 NY :20",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "K9NPI0QIqVOkuHD1",
+          "cachedResultName": "viral_config"
+        },
+        "returnAll": true
+      },
+      "id": "81b59318-7401-459b-8f39-37194e035714",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "returnAll": true
+      },
+      "id": "f8fc9142-b0c8-488e-9a60-2c7fbac971ff",
+      "name": "Get Posts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        96
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "notes": "All posts (small table): the pick filters by status and date."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pick for YouTube — which Reel to upload as a Short this run. Pure rules, no AI.\n//  - forced test post (yt_force_post_key): any READY/PUBLISHED post with a video, once, even if yt_enabled = 0;\n//  - otherwise, when yt_enabled = 1: the oldest Reel already PUBLISHED on Instagram in the last 48h and not yet\n//    on YouTube, while the New York daily cap (yt_max_per_day) allows it.\n// 0 items = nothing to do.\n\nconst rows = $('Load Config').all().map(i => i.json ?? {});\nconst val = (key, def) => {\n  const r = rows.find(x => x.key === key);\n  if (!r) return def;\n  if (typeof def === 'number') return Number.isFinite(Number(r.value_number)) && r.value_number !== null ? Number(r.value_number) : def;\n  return (r.value_string ?? '').trim() || def;\n};\nconst cfg = {\n  enabled: val('yt_enabled', 0) ? 1 : 0,\n  maxPerDay: val('yt_max_per_day', 2),\n  privacy: ['public', 'unlisted', 'private'].includes(val('yt_privacy', 'private')) ? val('yt_privacy', 'private') : 'private',\n  category: val('yt_category_id', '20'),\n  force: val('yt_force_post_key', ''),\n  chatId: val('telegram_chat_id', ''),\n};\n\nconst tz = 'America/New_York';\nconst nowMs = Date.now();\nconst today = $now.setZone(tz).toFormat('yyyy-MM-dd');\nconst nyDate = iso => (iso ? DateTime.fromISO(String(iso)).setZone(tz).toFormat('yyyy-MM-dd') : '');\nconst ageH = iso => (nowMs - Date.parse(iso ?? '')) / 3.6e6;\nconst posts = $input.all().map(i => i.json ?? {}).filter(p => p.post_key && p.video_url);\n\nlet pick = null, reason = '';\nif (cfg.force) {\n  pick = posts.find(p => p.post_key === cfg.force && !p.yt_video_id && ['READY', 'PUBLISHED'].includes(p.status));\n  reason = pick ? 'forced by yt_force_post_key' : '';\n  if (!pick) console.log(`forced post ${cfg.force} not found or already on YouTube: clear yt_force_post_key`);\n}\nif (!pick && cfg.enabled) {\n  const doneToday = posts.filter(p => p.yt_video_id && nyDate(p.yt_published_at) === today).length;\n  if (doneToday >= cfg.maxPerDay) {\n    console.log(`daily cap reached (${doneToday}/${cfg.maxPerDay})`);\n  } else {\n    const queue = posts\n      .filter(p => p.status === 'PUBLISHED' && !p.yt_video_id && !p.yt_error && ageH(p.published_at) <= 48)\n      .sort((a, b) => Date.parse(a.published_at) - Date.parse(b.published_at));\n    pick = queue[0] ?? null;\n    reason = pick ? `oldest of ${queue.length} published on Instagram, not yet on YouTube` : '';\n  }\n}\nif (!pick) return [];\n\nconst clean = s => String(s ?? '').replace(/[<>]/g, '').replace(/\\s+/g, ' ').trim();\nconst base = clean(pick.meme_caption || pick.hook || pick.title) || 'Streamer moment';\nconst creator = clean(pick.creator_name);\nlet title = creator && !base.toLowerCase().includes(creator.toLowerCase()) ? `${base} | ${creator}` : base;\ntitle = title.slice(0, 100 - ' #shorts'.length) + ' #shorts';\nconst tags = String(pick.hashtags ?? '').split(/\\s+/).filter(Boolean).slice(0, 12);\nconst description = [\n  String(pick.caption ?? '').replace(/[<>]/g, '').trim(),\n  '',\n  'Daily viral streamer moments. Subscribe for more! #shorts',\n].join('\\n').slice(0, 4900);\n\nreturn [{\n  json: {\n    post_key: pick.post_key, video_url: pick.video_url, creator_name: creator, reason,\n    forced: reason.startsWith('forced'),\n    title, description, tags: tags.join(','), privacy: cfg.privacy, category: cfg.category, chat_id: cfg.chatId,\n  },\n}];\n"
+      },
+      "id": "181c76df-ae7a-4bfb-8a95-a937614411b6",
+      "name": "Pick for YouTube",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        96
+      ],
+      "notes": "0 items = nothing to upload this run."
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.video_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "e6ae424d-9f0e-402c-95de-191e97e1caa2",
+      "name": "Download Reel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        896,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ $('Pick for YouTube').item.json.title }}",
+        "regionCode": "US",
+        "categoryId": "={{ $('Pick for YouTube').item.json.category }}",
+        "options": {
+          "defaultLanguage": "en",
+          "description": "={{ $('Pick for YouTube').item.json.description }}",
+          "embeddable": true,
+          "notifySubscribers": true,
+          "privacyStatus": "={{ $('Pick for YouTube').item.json.privacy }}",
+          "selfDeclaredMadeForKids": false,
+          "tags": "={{ $('Pick for YouTube').item.json.tags }}"
+        }
+      },
+      "id": "91c176fd-5c9a-4ff4-9a4a-ba9a1302afa1",
+      "name": "Upload Short",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        96
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "FYqqo11D1lTx8jqW",
+          "name": "US VIRAL - YouTube"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.uploadId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3651fffc-54cf-4cca-a703-72aeaf32f72e",
+      "name": "Uploaded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $('Pick for YouTube').item.json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "yt_video_id": "={{ $('Upload Short').item.json.uploadId }}",
+            "yt_published_at": "={{ $now.toISO() }}",
+            "yt_error": ""
+          }
+        },
+        "options": {}
+      },
+      "id": "5a0dc535-5992-4e0c-ac5c-35799b12fdeb",
+      "name": "Save YouTube Id",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Pick for YouTube').item.json.chat_id }}",
+        "text": "={{ '▶️ <b>Short su YouTube</b> (' + $('Pick for YouTube').item.json.privacy + ')\\n' + $('Pick for YouTube').item.json.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '\\nhttps://youtube.com/shorts/' + $('Upload Short').item.json.uploadId }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "988c8c82-8954-4750-8257-bc62bf97c3fb",
+      "name": "Notify Short",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1792,
+        0
+      ],
+      "executeOnce": true,
+      "webhookId": "d82808a3-29ec-4fbf-b12f-5c8e654eb695",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "fwidLBAWY5ihOfTY",
+          "name": "US VIRAL - Telegram"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $('Pick for YouTube').item.json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "yt_error": "={{ String($('Upload Short').item.json.error?.message ?? $('Upload Short').item.json.error ?? 'upload failed').slice(0, 500) }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "e9449040-e6ba-4bfe-a295-462f69b95de2",
+      "name": "Save YouTube Error",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        192
+      ],
+      "notes": "yt_error set: the post is not retried automatically (clear it to retry)."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Pick for YouTube').item.json.chat_id }}",
+        "text": "={{ '❌ <b>Upload YouTube fallito</b>\\n' + $('Pick for YouTube').item.json.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '\\n' + String($('Upload Short').item.json.error?.message ?? $('Upload Short').item.json.error ?? '').slice(0, 300).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "3152404d-e10d-48e2-8d1e-6f6e840246ad",
+      "name": "Notify Short Failed",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1792,
+        192
+      ],
+      "executeOnce": true,
+      "webhookId": "34515d1e-985e-47de-8ffc-19a4c6c8d61d",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "fwidLBAWY5ihOfTY",
+          "name": "US VIRAL - Telegram"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## US VIRAL YouTube Publisher\n12:20, 16:20, 20:20 New York (1h after the Instagram slots): uploads the oldest Reel already published on Instagram (last 48h) as a YouTube Short.\nviral_config: yt_enabled, yt_max_per_day, yt_privacy, yt_category_id, yt_force_post_key (test).",
+        "color": 5
+      },
+      "id": "2a6a3c04-c5c6-4601-aaa6-099953f5f64a",
+      "name": "Sticky Note 70434092",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        -272
+      ]
+    }
+  ],
+  "connections": {
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Get Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Posts": {
+      "main": [
+        [
+          {
+            "node": "Pick for YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick for YouTube": {
+      "main": [
+        [
+          {
+            "node": "Download Reel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Reel": {
+      "main": [
+        [
+          {
+            "node": "Upload Short",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Short": {
+      "main": [
+        [
+          {
+            "node": "Uploaded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uploaded?": {
+      "main": [
+        [
+          {
+            "node": "Save YouTube Id",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save YouTube Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save YouTube Id": {
+      "main": [
+        [
+          {
+            "node": "Notify Short",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save YouTube Error": {
+      "main": [
+        [
+          {
+            "node": "Notify Short Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "After Slots 12-16-20 NY :20": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "LfLwNkCRfJgGmxUr",
+    "timezone": "America/New_York",
+    "saveManualExecutions": true,
+    "executionTimeout": 280,
+    "binaryMode": "separate"
+  },
+  "description": "US VIRAL YouTube Publisher: 1h after each Instagram slot uploads the oldest Reel already published on Instagram as a YouTube Short (yt_enabled, yt_max_per_day, yt_privacy, yt_force_post_key for tests).",
+  "nodeGroups": [
+    {
+      "id": "018d4863-e140-4ed6-8a94-b41668973fc8",
+      "name": "Pick",
+      "nodeNames": [
+        "Load Config",
+        "Get Posts",
+        "Pick for YouTube"
+      ],
+      "description": "Config + posts: oldest Reel already on Instagram, not yet on YouTube (or the forced test post)"
+    },
+    {
+      "id": "38044fc4-ea14-4209-996d-fa0010c1b0ec",
+      "name": "Upload",
+      "nodeNames": [
+        "Download Reel",
+        "Upload Short"
+      ],
+      "description": "Download the Reel from the worker and upload it as a Short"
+    },
+    {
+      "id": "a888577b-ab2d-4c57-8219-51be4102246d",
+      "name": "Uploaded",
+      "nodeNames": [
+        "Save YouTube Id",
+        "Notify Short"
+      ],
+      "description": "Save yt_video_id + Telegram"
+    },
+    {
+      "id": "30bde04e-f061-4030-b93c-d4c637f2d816",
+      "name": "Failed",
+      "nodeNames": [
+        "Save YouTube Error",
+        "Notify Short Failed"
+      ],
+      "description": "Save yt_error (no retry) + Telegram"
+    }
+  ],
+  "meta": {
+    "n8n_id": "rC094L4AN8M2PrHv",
+    "versionId": "f129656a-ae34-4b8a-b3ce-95dbc7786a64",
+    "active": false,
+    "exported_from_updatedAt": "2026-10-06T13:08:51.819Z"
+  }
+}

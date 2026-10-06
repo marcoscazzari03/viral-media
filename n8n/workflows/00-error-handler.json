@@ -1,0 +1,285 @@
+{
+  "name": "00 - US VIRAL | Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "ca374ffa-555e-4f64-88df-fff7bc79a87d",
+      "name": "On Workflow Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Error — turns the Error Trigger payload into a viral_runs row (status ERROR)\n// plus alert_text for the Telegram alert. Works for both execution errors and trigger errors.\n\nconst e = $input.first().json ?? {};\nconst exec = e.execution ?? {};\nconst trig = e.trigger ?? {};\nconst err = exec.error ?? trig.error ?? {};\nconst now = new Date().toISOString();\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst details = {\n  message: err.message ?? 'unknown error',\n  description: err.description ?? null,\n  node: exec.lastNodeExecuted ?? err.node?.name ?? null,\n  execution_id: exec.id ?? null,\n  execution_url: exec.url ?? null,\n  mode: exec.mode ?? trig.mode ?? null,\n  stack: String(err.stack ?? '').slice(0, 1500),\n};\nconst workflow = e.workflow?.name ?? 'unknown';\n\nconst alertText = [\n  '⚠️ <b>US VIRAL — errore</b>',\n  `<b>${esc(workflow)}</b>`,\n  `Nodo: ${esc(details.node ?? '-')}`,\n  esc(String(details.message).slice(0, 600)),\n  details.execution_url ? esc(details.execution_url) : '',\n].filter(Boolean).join('\\n');\n\nreturn [{\n  json: {\n    run_id: `err-${exec.id ?? Date.now()}`,\n    workflow,\n    started_at: now,\n    finished_at: now,\n    status: 'ERROR',\n    sources_polled: 0,\n    videos_fetched: 0,\n    new_candidates: 0,\n    updated_candidates: 0,\n    eligible: 0,\n    expired: 0,\n    rejected: 0,\n    quota_units_est: 0,\n    errors: JSON.stringify(details).slice(0, 4000),\n    alert_text: alertText,\n  },\n}];\n"
+      },
+      "id": "bb113016-4fa0-40b1-8cb2-34c888cf0c05",
+      "name": "Format Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "sZvqRG1Cg9nFH7lR",
+          "cachedResultName": "viral_runs"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "run_id": "={{ $json.run_id }}",
+            "workflow": "={{ $json.workflow }}",
+            "started_at": "={{ $json.started_at }}",
+            "finished_at": "={{ $json.finished_at }}",
+            "status": "={{ $json.status }}",
+            "sources_polled": "={{ $json.sources_polled }}",
+            "videos_fetched": "={{ $json.videos_fetched }}",
+            "new_candidates": "={{ $json.new_candidates }}",
+            "updated_candidates": "={{ $json.updated_candidates }}",
+            "eligible": "={{ $json.eligible }}",
+            "expired": "={{ $json.expired }}",
+            "rejected": "={{ $json.rejected }}",
+            "quota_units_est": "={{ $json.quota_units_est }}",
+            "errors": "={{ $json.errors }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "run_id",
+              "displayName": "run_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "started_at",
+              "displayName": "started_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "finished_at",
+              "displayName": "finished_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sources_polled",
+              "displayName": "sources_polled",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "videos_fetched",
+              "displayName": "videos_fetched",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "new_candidates",
+              "displayName": "new_candidates",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_candidates",
+              "displayName": "updated_candidates",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "eligible",
+              "displayName": "eligible",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "expired",
+              "displayName": "expired",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "rejected",
+              "displayName": "rejected",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "quota_units_est",
+              "displayName": "quota_units_est",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errors",
+              "displayName": "errors",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "75ed1070-d22e-448c-9a72-8c3d11405372",
+      "name": "Log Error to viral_runs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## US VIRAL Error Handler\nSet as Error Workflow in every US VIRAL workflow.\nLogs each failed production execution into viral_runs (status = ERROR)\nand sends a Telegram alert (US VIRAL - Telegram bot).",
+        "color": 5
+      },
+      "id": "7ff7aa48-887b-4b02-9e9c-a798a6b49262",
+      "name": "Sticky Note 55283823",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        176,
+        192
+      ]
+    },
+    {
+      "id": "b0324f11-44d8-4e58-8fd6-91836a225a0a",
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        480,
+        200
+      ],
+      "parameters": {
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        },
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "operation": "sendMessage",
+        "resource": "message",
+        "text": "={{ $json.alert_text }}"
+      },
+      "notes": "Chat id = viral_config.telegram_chat_id (hard-coded here: the Error Trigger has no config step).",
+      "onError": "continueRegularOutput",
+      "webhookId": "83b991f7-6f3b-4b06-b4d9-839d52c877f6",
+      "credentials": {
+        "telegramApi": {
+          "id": "fwidLBAWY5ihOfTY",
+          "name": "US VIRAL - Telegram"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "On Workflow Error": {
+      "main": [
+        [
+          {
+            "node": "Format Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error": {
+      "main": [
+        [
+          {
+            "node": "Log Error to viral_runs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "timezone": "America/New_York",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "binaryMode": "separate"
+  },
+  "description": "Error Workflow for all US VIRAL workflows: logs failed production executions into viral_runs (status ERROR). Telegram alert to be added.",
+  "nodeGroups": [],
+  "meta": {
+    "n8n_id": "LfLwNkCRfJgGmxUr",
+    "versionId": "4ddf4e67-a343-4349-ad80-daff2f2ecc6c",
+    "active": true,
+    "exported_from_updatedAt": "2026-10-06T07:37:46.321Z"
+  }
+}

@@ -1,0 +1,1140 @@
+{
+  "name": "03 - US VIRAL | Publisher",
+  "nodes": [
+    {
+      "id": "215046ca-9e99-4b39-8d22-2ee0a15f623e",
+      "name": "Slots 11-15-19 NY (+1h) :05",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "expression": "5 11,12,15,16,19,20 * * *",
+              "field": "cronExpression"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "3bd3c263-75e3-4fa3-b252-f183a97e2352",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "K9NPI0QIqVOkuHD1",
+          "cachedResultName": "viral_config"
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "2f33c3c2-2dc8-4d06-8aed-d16a3c6e81be",
+      "name": "Init Publisher",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Init Publisher — run context + typed config (viral_config). Missing keys fall back to DEFAULTS.\n\nconst DEFAULTS = {\n  ig_user_id: '',\n  ig_api_version: 'v23.0',\n  publish_enabled: 0,\n  publish_slots_et: '11,15,19',\n  publish_max_per_day: 1,\n  publish_min_gap_h: 3,\n  publish_ready_max_age_h: 36,\n  publish_force_post_key: '',\n};\n\nconst warnings = [];\nconst config = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json;\n  const key = String(r.key ?? '').trim();\n  if (!(key in DEFAULTS)) continue;\n  const hasNum = r.value_number !== null && r.value_number !== undefined && Number.isFinite(Number(r.value_number));\n  const hasStr = typeof r.value_string === 'string' && r.value_string.trim() !== '';\n  if (typeof DEFAULTS[key] === 'number') {\n    const v = hasNum ? Number(r.value_number) : (hasStr ? Number(r.value_string) : NaN);\n    if (Number.isFinite(v)) config[key] = v;\n    else warnings.push(`key \"${key}\" has no valid number: default ${DEFAULTS[key]} used`);\n  } else if (hasStr) {\n    config[key] = r.value_string.trim();\n  }\n}\nconfig.publish_slots_et = String(config.publish_slots_et).split(',').map(s => Number(s.trim())).filter(h => Number.isInteger(h) && h >= 0 && h <= 23);\nconfig.publish_enabled = config.publish_enabled ? 1 : 0;\nif (!config.ig_user_id) warnings.push('ig_user_id missing: publishing will fail');\n\nconst nyNow = $now.setZone('America/New_York');\nreturn [{\n  json: {\n    run_id: `pub-${nyNow.toFormat('yyyyMMdd-HHmm')}-${$execution.id}`,\n    started_at_ms: Date.now(),\n    ny_date: nyNow.toFormat('yyyy-MM-dd'),\n    ny_hour: nyNow.hour,\n    graph: `https://graph.instagram.com/${config.ig_api_version}`,\n    config_warnings: warnings,\n    config,\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "1db44de1-49e8-4f3b-9d63-8e5f7b39a2bf",
+      "name": "Get Posts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "anyCondition",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "READY"
+            },
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "PUBLISHING"
+            },
+            {
+              "keyName": "published_at",
+              "condition": "gte",
+              "keyValue": "={{ $now.minus({ hours: 48 }).toISO() }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "notes": "READY + PUBLISHING posts and everything published in the last 48h.",
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "1ee94536-81bc-4a35-bf2c-bef89be4078a",
+      "name": "Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Decide — what the Publisher does this run. Pure rules, no AI. Output items (first one is the action):\n//  - resume:  a post left PUBLISHING by a previous run (Instagram was still processing the video)\n//  - publish: the best READY Reel, if the slot / daily cap / gap rules allow it (or the forced test post)\n//  - stale:   READY Reels too old for their trend (marked STALE so they stop blocking the Factory buffer)\n// 0 items = nothing to do.\n\nconst run = $('Init Publisher').first().json;\nconst cfg = run.config;\nconst nowMs = run.started_at_ms;\nconst posts = $input.all().map(i => i.json ?? {}).filter(p => p.post_key);\nconst ageH = iso => (nowMs - Date.parse(iso ?? '')) / 3.6e6;\nconst nyDate = iso => DateTime.fromISO(String(iso)).setZone('America/New_York').toFormat('yyyy-MM-dd');\nconst pick = p => ({\n  post_key: p.post_key, candidate_key: p.candidate_key, video_url: p.video_url, cover_url: p.cover_url,\n  caption: p.caption, ig_container_id: p.ig_container_id ?? null, title: p.title, creator_name: p.creator_name,\n});\n\nconst out = [];\nconst pending = posts.find(p => p.status === 'PUBLISHING' && p.ig_container_id);\nconst ready = posts.filter(p => p.status === 'READY' && p.video_url);\nconst stale = ready.filter(p => ageH(p.created_at) > cfg.publish_ready_max_age_h && p.post_key !== cfg.publish_force_post_key);\n// Test posts (forced by hand in the Factory) are never published automatically, only via publish_force_post_key\nconst isTest = p => String(p.status_reason ?? '').startsWith('forced');\nconst fresh = ready.filter(p => !stale.includes(p) && !isTest(p));\nconst published = posts.filter(p => p.status === 'PUBLISHED' && p.published_at);\nconst today = published.filter(p => nyDate(p.published_at) === run.ny_date).length;\nconst lastH = published.length ? Math.min(...published.map(p => ageH(p.published_at))) : Infinity;\n\nlet reason;\nif (pending) {\n  out.push({ json: { action: 'resume', ...pick(pending), reason: 'container still processing in a previous run' } });\n} else if (cfg.publish_force_post_key) {\n  const f = ready.find(p => p.post_key === cfg.publish_force_post_key);\n  if (f) out.push({ json: { action: 'publish', ...pick(f), reason: 'forced by publish_force_post_key' } });\n  else reason = `forced post ${cfg.publish_force_post_key} not READY (already published or missing): clear publish_force_post_key`;\n} else if (!cfg.publish_enabled) reason = 'publish_enabled = 0';\nelse if (!cfg.publish_slots_et.includes(run.ny_hour)) reason = `${run.ny_hour}:00 New York is not a slot (${cfg.publish_slots_et.join(', ')})`;\nelse if (today >= cfg.publish_max_per_day) reason = `daily cap reached (${today}/${cfg.publish_max_per_day})`;\nelse if (lastH < cfg.publish_min_gap_h) reason = `last post ${lastH.toFixed(1)}h ago (< ${cfg.publish_min_gap_h}h)`;\nelse if (!fresh.length) reason = 'no fresh READY Reel';\nelse {\n  fresh.sort((a, b) => (Number(b.trend_score) || 0) - (Number(a.trend_score) || 0) || Date.parse(b.created_at) - Date.parse(a.created_at));\n  out.push({ json: { action: 'publish', ...pick(fresh[0]), reason: `best of ${fresh.length} READY (score ${fresh[0].trend_score})` } });\n}\nif (reason) console.log('no publish:', reason);\nfor (const p of stale) out.push({ json: { action: 'stale', ...pick(p), reason: `READY for ${Math.round(ageH(p.created_at))}h` } });\nreturn out;\n"
+      },
+      "notes": "Slots, daily cap, gap, freshness. First item = action (publish/resume), then stale ones. 0 items = nothing to do."
+    },
+    {
+      "id": "d89c170e-733e-4b3a-a3dd-db3c753dc03a",
+      "name": "Route Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "renameOutput": true,
+              "outputKey": "publish",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "publish",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "renameOutput": true,
+              "outputKey": "resume",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "resume",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "renameOutput": true,
+              "outputKey": "stale",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "stale",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c80eb610-9154-48db-9e71-bd6d389510df",
+      "name": "Create Container",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1320,
+        140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Init Publisher').first().json.graph }}/{{ $('Init Publisher').first().json.config.ig_user_id }}/media",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "media_type",
+              "value": "REELS"
+            },
+            {
+              "name": "video_url",
+              "value": "={{ $json.video_url }}"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $json.caption }}"
+            },
+            {
+              "name": "share_to_feed",
+              "value": "true"
+            },
+            {
+              "name": "cover_url",
+              "value": "={{ $json.cover_url }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "notes": "Instagram downloads the Reel from the worker URL and processes it (async).",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "xBiS6L2qpWSWjdB0",
+          "name": "US VIRAL - Instagram"
+        }
+      }
+    },
+    {
+      "id": "e4dba494-299e-44da-a477-8affc997cb01",
+      "name": "Container Created?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1540,
+        140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "058e3dd9-fd1f-4e73-b31f-05a9031b1735",
+      "name": "Save Container",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        60
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "condition": "eq",
+              "keyValue": "={{ $('Decide').first().json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "status": "PUBLISHING",
+            "ig_container_id": "={{ $('Create Container').first().json.id }}",
+            "updated_at": "={{ $now.toISO() }}"
+          }
+        }
+      },
+      "notes": "PUBLISHING + container id: if this run ends before Instagram is done, the next run resumes it."
+    },
+    {
+      "id": "7ac86056-cce8-4cc0-9b33-fda013d0cd71",
+      "name": "Wait 20s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1980,
+        300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 20,
+        "unit": "seconds"
+      },
+      "webhookId": "e938de50-c550-4313-9a11-43cbae056b70"
+    },
+    {
+      "id": "79523611-1d06-4097-a33c-6e770dec94d7",
+      "name": "Mark Publish Failed",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3080,
+        300
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "condition": "eq",
+              "keyValue": "={{ $('Decide').first().json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "status": "PUBLISH_FAILED",
+            "error": "={{ String($json.error?.message ?? $json.status ?? JSON.stringify($json)).slice(0, 1000) }}",
+            "updated_at": "={{ $now.toISO() }}"
+          }
+        }
+      },
+      "notes": "Video stays on the worker: fix the cause, set the post back to READY to retry."
+    },
+    {
+      "id": "6e8f5c19-8aaa-457a-8986-0d566282cc7e",
+      "name": "Mark Stale",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        480
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "condition": "eq",
+              "keyValue": "={{ $json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "status": "STALE",
+            "status_reason": "={{ $json.reason }}",
+            "updated_at": "={{ $now.toISO() }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "55e7d65e-8d4c-44b9-b923-2655369190d4",
+      "name": "Check Container",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2200,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Init Publisher').first().json.graph }}/{{ $('Decide').first().json.action === 'resume' ? $('Decide').first().json.ig_container_id : $('Create Container').first().json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "status_code,status"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "xBiS6L2qpWSWjdB0",
+          "name": "US VIRAL - Instagram"
+        }
+      }
+    },
+    {
+      "id": "f654caf2-bdfa-4176-bb7a-f43c89cf8e9b",
+      "name": "Container Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2420,
+        300
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "renameOutput": true,
+              "outputKey": "finished",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status_code }}",
+                    "rightValue": "FINISHED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "renameOutput": true,
+              "outputKey": "failed",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ ['ERROR','EXPIRED'].includes($json.status_code) || ($json.error !== undefined && $json.status_code === undefined) }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "in progress"
+        }
+      },
+      "notes": "FINISHED -> publish, ERROR/EXPIRED -> failed, IN_PROGRESS -> wait again."
+    },
+    {
+      "id": "3820153d-7e95-4257-8167-7edffc6299d0",
+      "name": "Publish Media",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2640,
+        140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Init Publisher').first().json.graph }}/{{ $('Init Publisher').first().json.config.ig_user_id }}/media_publish",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "creation_id",
+              "value": "={{ $('Decide').first().json.action === 'resume' ? $('Decide').first().json.ig_container_id : $('Create Container').first().json.id }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "xBiS6L2qpWSWjdB0",
+          "name": "US VIRAL - Instagram"
+        }
+      }
+    },
+    {
+      "id": "3b34fd44-4ae7-4bea-b4b9-740102d514d4",
+      "name": "Published?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2860,
+        140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "113efd5a-3928-44e6-af5e-03fa7e9dd51e",
+      "name": "Get Permalink",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        3080,
+        60
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Init Publisher').first().json.graph }}/{{ $json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "permalink,timestamp"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "xBiS6L2qpWSWjdB0",
+          "name": "US VIRAL - Instagram"
+        }
+      }
+    },
+    {
+      "id": "6a74777c-79d7-441e-9c02-6a7b9334cf03",
+      "name": "Mark Published",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3300,
+        60
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "condition": "eq",
+              "keyValue": "={{ $('Decide').first().json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "status": "PUBLISHED",
+            "ig_media_id": "={{ $('Publish Media').first().json.id }}",
+            "ig_permalink": "={{ $json.permalink ?? '' }}",
+            "published_at": "={{ $now.toISO() }}",
+            "updated_at": "={{ $now.toISO() }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "496f1f29-53ae-49b3-904d-d04a1779b9e4",
+      "name": "Candidate Published",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3520,
+        60
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "XPwUBovmuqyubatZ",
+          "cachedResultName": "viral_candidates"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "candidate_key",
+              "condition": "eq",
+              "keyValue": "={{ $('Decide').first().json.candidate_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "status": "PUBLISHED",
+            "status_reason": "={{ 'published ' + $('Decide').first().json.post_key }}",
+            "status_changed_at": "={{ $now.toISO() }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "0cc9412e-3975-4db9-9fde-b8e756bde8fd",
+      "name": "Time Left?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        480
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ Date.now() - $('Init Publisher').first().json.started_at_ms < 230000 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Stop at ~4 min (n8n Cloud 5-min limit): the post stays PUBLISHING and is resumed next run."
+    },
+    {
+      "id": "a7af73e9-65ce-4de4-948d-e3fa15abfdd2",
+      "name": "Notify Published",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3740,
+        60
+      ],
+      "parameters": {
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        },
+        "chatId": "={{ $('Load Config').all().find(i => i.json.key === 'telegram_chat_id')?.json.value_string ?? '' }}",
+        "operation": "sendMessage",
+        "resource": "message",
+        "text": "={{ '✅ <b>Reel pubblicato</b>\\n' + String($('Decide').first().json.creator_name ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + ' — ' + String($('Decide').first().json.title ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '\\n' + ($('Get Permalink').first().json.permalink ?? '') }}"
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true,
+      "webhookId": "7ba74cd9-25d0-49a3-8b18-18e287cc33f5",
+      "credentials": {
+        "telegramApi": {
+          "id": "fwidLBAWY5ihOfTY",
+          "name": "US VIRAL - Telegram"
+        }
+      }
+    },
+    {
+      "id": "999e5c87-ba5f-4a40-a318-088427650941",
+      "name": "Notify Publish Failed",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3300,
+        300
+      ],
+      "parameters": {
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        },
+        "chatId": "={{ $('Load Config').all().find(i => i.json.key === 'telegram_chat_id')?.json.value_string ?? '' }}",
+        "operation": "sendMessage",
+        "resource": "message",
+        "text": "={{ '❌ <b>Pubblicazione fallita</b>\\n' + String($('Decide').first().json.creator_name ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + ' — ' + String($('Decide').first().json.title ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '\\n' + String($json.error ?? '').slice(0, 500).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '\\nIl post è in PUBLISH_FAILED: il video resta sul server.' }}"
+      },
+      "onError": "continueRegularOutput",
+      "executeOnce": true,
+      "webhookId": "7d777b4b-0d8d-4e3e-b5f7-8eaf6d6c1023",
+      "credentials": {
+        "telegramApi": {
+          "id": "fwidLBAWY5ihOfTY",
+          "name": "US VIRAL - Telegram"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Init Publisher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Publisher": {
+      "main": [
+        [
+          {
+            "node": "Get Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Posts": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Route Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Action": {
+      "main": [
+        [
+          {
+            "node": "Create Container",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 20s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Stale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Container": {
+      "main": [
+        [
+          {
+            "node": "Container Created?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Container Created?": {
+      "main": [
+        [
+          {
+            "node": "Save Container",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Publish Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Container": {
+      "main": [
+        [
+          {
+            "node": "Wait 20s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 20s": {
+      "main": [
+        [
+          {
+            "node": "Check Container",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Container": {
+      "main": [
+        [
+          {
+            "node": "Container Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Container Status": {
+      "main": [
+        [
+          {
+            "node": "Publish Media",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Publish Failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Time Left?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish Media": {
+      "main": [
+        [
+          {
+            "node": "Published?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Published?": {
+      "main": [
+        [
+          {
+            "node": "Get Permalink",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Publish Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Permalink": {
+      "main": [
+        [
+          {
+            "node": "Mark Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Published": {
+      "main": [
+        [
+          {
+            "node": "Candidate Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Time Left?": {
+      "main": [
+        [
+          {
+            "node": "Wait 20s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Candidate Published": {
+      "main": [
+        [
+          {
+            "node": "Notify Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Publish Failed": {
+      "main": [
+        [
+          {
+            "node": "Notify Publish Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slots 11-15-19 NY (+1h) :05": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "LfLwNkCRfJgGmxUr",
+    "timezone": "America/New_York",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionTimeout": 300
+  },
+  "description": "US VIRAL Publisher: publishes READY Reels to @viralstreamersdaily via the Instagram API in New York time slots, with daily cap, min gap, STALE marking and resume of pending containers.",
+  "nodeGroups": [
+    {
+      "id": "2075fb8c-6815-4c2f-97bb-e120085e5c8f",
+      "name": "Setup",
+      "nodeNames": [
+        "Load Config",
+        "Init Publisher"
+      ],
+      "description": "Read viral_config, New York time, Graph API base"
+    },
+    {
+      "id": "c6e069f6-b319-4c0d-a00e-ba51945a634c",
+      "name": "Decide",
+      "nodeNames": [
+        "Get Posts",
+        "Decide",
+        "Route Action"
+      ],
+      "description": "Resume a pending post, or pick the best READY Reel if slot/cap/gap allow; mark old ones STALE"
+    },
+    {
+      "id": "1d1de05d-95d0-4e6b-a8b6-5146399d69b8",
+      "name": "Create Container",
+      "nodeNames": [
+        "Create Container",
+        "Container Created?"
+      ],
+      "description": "Instagram fetches the Reel from the worker URL"
+    },
+    {
+      "id": "2d0dd3a7-2d15-4880-b8e3-8774b2fc0289",
+      "name": "Poll Container",
+      "nodeNames": [
+        "Wait 20s",
+        "Check Container"
+      ],
+      "description": "Every 20s: is Instagram done processing the video?"
+    },
+    {
+      "id": "36de1f9e-a58b-46c0-905a-d35bd46950c3",
+      "name": "Published",
+      "nodeNames": [
+        "Get Permalink",
+        "Mark Published",
+        "Candidate Published",
+        "Notify Published"
+      ],
+      "description": "Permalink, post + candidate PUBLISHED, Telegram message"
+    },
+    {
+      "id": "9dbc3313-492f-4232-abca-77542b814b84",
+      "name": "Publish Failed",
+      "nodeNames": [
+        "Mark Publish Failed",
+        "Notify Publish Failed"
+      ],
+      "description": "Post PUBLISH_FAILED + Telegram message"
+    }
+  ],
+  "meta": {
+    "n8n_id": "Ph4LAbc40sj8oBOI",
+    "versionId": "15c79ed4-c6d0-497d-8523-e29e1cb4c5d5",
+    "active": true,
+    "exported_from_updatedAt": "2026-10-06T13:08:47.124Z"
+  }
+}
