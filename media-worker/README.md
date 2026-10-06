@@ -81,6 +81,25 @@ shows from the start). `intro` is optional: without it the clip plays with its o
 
 `{ "text": "...", "speed": 1.0 }` → `audio_url`, `duration`.
 
+## TikTok publishing
+
+`https://DOMAIN/panel` is a password-protected publishing page (`PANEL_PASSWORD`): connect the TikTok account with
+"Continue with TikTok", pick a rendered Reel, choose who can view it, interaction settings and content disclosure,
+then post it directly or send it to the TikTok inbox as a draft. n8n uses the same functions with the bearer token:
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/tiktok/post` | `{video_url, mode: "direct"\|"inbox", title, privacy_level, disable_comment, disable_duet, disable_stitch, brand_content, brand_organic}` → `{publish_id}` |
+| GET | `/tiktok/status/{publish_id}` | `PROCESSING_DOWNLOAD` → `PUBLISH_COMPLETE` / `SEND_TO_USER_INBOX` / `FAILED` |
+| GET | `/tiktok/creator` | privacy options, interaction settings, max duration |
+
+Needs `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` in `.env` and the TikTok app's Login Kit redirect URI set to
+`https://DOMAIN/tiktok/callback`. Videos are pulled by TikTok from `https://DOMAIN/files/...` (domain verified in
+the TikTok app). Until the app passes TikTok's review, direct posts are only visible to the account owner.
+The tokens are stored in the data volume (`/srv/media/tiktok`, not served publicly) and refreshed automatically.
+
+Public legal pages for the developer apps: `https://DOMAIN/legal/` (privacy, terms).
+
 ## Install (Ubuntu 24.04, as root)
 
 ```bash
