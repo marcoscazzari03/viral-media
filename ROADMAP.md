@@ -2,8 +2,12 @@
 
 Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 
+## Fatto
+- [x] Scala velocità Twitch (`twitch_vph_log_ceil` 3 → 2.3) e `factory_min_views` 500 → 250.
+- [x] Clip ELIGIBLE "appiccicose" (picco confermato ≥ 60 e punteggio ancora ≥ 50), finestra Twitch 72 h (scadenza 96 h), minimo 250 views già nel Discovery.
+
 ## Domani, dopo il controllo della prima pubblicazione automatica
-- [ ] Avviso giornaliero "nessun Reel pubblicato oggi", con il motivo (nuovo workflow `US VIRAL |`, attivato solo dopo ok).
+- [ ] Avviso giornaliero (canale da scegliere: Telegram o email; l'Error Handler oggi scrive solo in `viral_runs`) "nessun Reel pubblicato oggi", con il motivo (nuovo workflow `US VIRAL |`, attivato solo dopo ok).
 - [ ] Stile ispirato a @jakeetimberlake:
   - [ ] frase meme fissa (2-5 parole, ironica) per tutto il video, al posto dell'hook che sparisce;
   - [ ] voce AI opzionale, per un A/B test con e senza voce;
@@ -15,6 +19,8 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [ ] Layout gaming: facecam sopra, gioco sotto.
 
 ## Più avanti
+- [ ] Più streamer Twitch tra le fonti (oggi ~7: poche clip forti).
+- [ ] Ripulire i post di test rimasti a metà e la clip bloccata in PROCESSING.
 - [ ] Passare a 2 Reel al giorno (`publish_max_per_day` = 2) se i primi giorni vanno bene.
 - [ ] Pubblicazione su Pagina Facebook.
 - [ ] YouTube Shorts: creare il canale e chiedere subito l'audit API.
