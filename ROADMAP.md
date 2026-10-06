@@ -18,6 +18,14 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [ ] Fonte YouTube (IShowSpeed e live): attivare il ramo YouTube nella Factory, con più cautela sui diritti.
 - [ ] Layout gaming: facecam sopra, gioco sotto.
 
+## TikTok (@viralstreamersdaily)
+- [x] App "US Viral Publisher" su developers.tiktok.com, dominio media.weborastudio.it verificato, pagine legali.
+- [x] Pagina di pubblicazione https://media.weborastudio.it/panel (login TikTok, post diretto / bozza) testata in Sandbox.
+- [ ] Revisione TikTok inviata con video demo: attendere approvazione.
+- [ ] Dopo l'approvazione: chiavi Production nel `.env`, ricollegare l'account dal pannello, **account TikTok di nuovo pubblico**.
+- [ ] Workflow n8n per pubblicare su TikTok in automatico (stesso endpoint `/tiktok/post`).
+- [ ] Rigenerare `API_TOKEN` del server e secret TikTok Sandbox (sono passati in chat).
+
 ## Più avanti
 - [ ] Più streamer Twitch tra le fonti (oggi ~7: poche clip forti).
 - [ ] Ripulire i post di test rimasti a metà e la clip bloccata in PROCESSING.
