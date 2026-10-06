@@ -33,6 +33,14 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [ ] Workflow n8n per pubblicare su TikTok in automatico (stesso endpoint `/tiktok/post`).
 - [ ] Rigenerare `API_TOKEN` del server e secret TikTok Sandbox (sono passati in chat).
 
+## Blocco Meta (6 ottobre)
+- [ ] Pubblicazione Instagram via API bloccata ("API access blocked", primo tentativo 17:05): verifica di sicurezza
+  sull'account Facebook (loop di login da PC). `publish_enabled` = 0, Reel pubblicati a mano dal pannello
+  (poi status `PUBLISHED` in viral_posts).
+- [ ] Valori temporanei per far lavorare la Factory a pubblicazione spenta: `factory_max_reels_per_day` = 6,
+  `publish_max_per_day` = 5. **Alla ripartenza rimettere 3 e 2**, poi `publish_enabled` = 1 dopo un solo test.
+- [ ] Il Reel CaseOh "lol" è in PUBLISH_FAILED (vecchio stile): non ripubblicarlo.
+
 ## Più avanti
 - [ ] Rendere il repo GitHub privato: prima deploy key di sola lettura sul server (altrimenti `update.sh` non riesce più a fare `git pull`), poi Settings → Change visibility.
 - Nota esecuzioni n8n (limite 2.500/mese, condiviso con tutti i workflow): 01 e 02 ogni 2 ore, 03 alle 11-12-15-16-19-20 NY, 04 ogni 6 ore, 05 una volta al giorno, 06 alle 12-16-20 NY. Circa 40 esecuzioni al giorno (≈1.250 al mese) con YouTube attivo. **Se cambi `publish_slots_et`, vanno cambiati anche gli orari dei trigger di 03 e 06.**
