@@ -6,6 +6,7 @@ Whether a source may be used is decided upstream (rights_status in n8n), not her
 """
 
 import json
+import math
 import os
 import subprocess
 import textwrap
@@ -362,14 +363,19 @@ def finish(job_dir: Path, job_id: str, duration: float, captions: int, keep: tup
 # no frozen intro frame, the clip is in motion from frame one.
 AUDIO_OUT = ["-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"]
 HIGHLIGHT = "&H0000E6FF&"  # ASS colours are BGR: yellow #FFE600
-ACCENT = "&H00FF5CB4&"  # brand purple #B45CFF, for the key word of the meme line (top_accent)
+ACCENT = "&H00FF5CB4&"  # brand purple #B45CFF, for the key word of the meme line (top_accent, "clean" style)
+POP_YELLOW = "&H0021D2FF&"  # #FFD221: key word, underline and sparks of the "pop" meme line
 
 # Style line template: margins come from the layout (where the clip sits in the frame)
 CLIP_ASS_STYLES = """Style: Caption,DejaVu Sans,96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,8,3,2,70,70,{caption_v},1
 Style: Hook,DejaVu Sans,92,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,22,0,8,60,60,{hook_v},1
 Style: Top,Montserrat ExtraBold,92,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,5,3,8,60,60,{top_v},1
 Style: Watermark,DejaVu Sans,46,&H50FFFFFF,&H50FFFFFF,&H90000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,0,8,40,40,{watermark_v},1
-Style: Credit,DejaVu Sans,34,&H40FFFFFF,&H40FFFFFF,&H90000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,40,40,{credit_v},1"""
+Style: Credit,DejaVu Sans,34,&H40FFFFFF,&H40FFFFFF,&H90000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,40,40,{credit_v},1
+Style: Pop,Montserrat Black,88,&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,0,0,0,0,100,100,0,0,1,4,5,8,40,40,0,1
+Style: PopHandle,Montserrat ExtraBold,40,&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,0,0,0,0,100,100,0,0,1,3,2,8,0,0,0,1
+Style: PopCredit,DejaVu Sans,30,&H40FFFFFF,&H40FFFFFF,&H90000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,0,0,0,1
+Style: Draw,DejaVu Sans,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1"""
 
 
 def clip_layout(fg_h: int) -> dict:
@@ -413,18 +419,66 @@ def balanced_wrap(text: str, width: int) -> list[str]:
     return lines
 
 
-def accent_words(line: str, accent: str) -> str:
+def accent_words(line: str, accent: str, colour: str = ACCENT) -> str:
     """Colours the words of `accent` (e.g. "never") inside one line of the meme text, ignoring case and punctuation."""
     keys = {w.strip(".,!?'\"").lower() for w in accent.split()} - {""}
     if not keys:
         return line
-    return " ".join(f"{{\\c{ACCENT}}}{w}{{\\c&H00FFFFFF&}}" if w.strip(".,!?'\"").lower() in keys else w
+    return " ".join(f"{{\\c{colour}}}{w}{{\\c&H00FFFFFF&}}" if w.strip(".,!?'\"").lower() in keys else w
                     for w in line.split(" "))
+
+
+def pop_top_events(text: str, accent: str, watermark: str, credit: str, duration: float) -> list[str]:
+    """"Pop" meme line: tilted bold text with the key word in yellow, a yellow swoosh under it, sparks on both
+    sides, then the page handle (small yellow underline) and the source credit. Sits above the clip."""
+    lines = balanced_wrap(ass_escape(text), 18)
+    n = len(lines)
+    fs = 88 if n <= 2 else 74
+    lh, y0, ang = fs * 1.05, 92, 5
+    cy = y0 + lh * n / 2
+    t0, t1 = ass_time(0), ass_time(duration)
+
+    def rot(x: float, y: float) -> tuple[float, float]:  # same rotation as \frz around the text centre
+        a = math.radians(-ang)
+        dx, dy = x - 540, y - cy
+        return 540 + dx * math.cos(a) - dy * math.sin(a), cy + dx * math.sin(a) + dy * math.cos(a)
+
+    def spark(cx: float, cy_: float, angles: list[int]) -> str:  # 3 tapered strokes radiating from a point
+        out = []
+        for deg in angles:
+            r = math.radians(deg)
+            x0, y_0 = cx + 18 * math.cos(r), cy_ + 18 * math.sin(r)
+            x1, y_1 = cx + 52 * math.cos(r), cy_ + 52 * math.sin(r)
+            px, py = -math.sin(r) * 4, math.cos(r) * 4
+            out.append(f"m {x0 + px:.0f} {y_0 + py:.0f} l {x1:.0f} {y_1:.0f} l {x0 - px:.0f} {y_0 - py:.0f}")
+        return " ".join(out)
+
+    draw = f"\\1c{POP_YELLOW}\\bord2\\3c&H00000000&\\shad0\\p1"
+    body = "\\N".join(accent_words(line, accent, POP_YELLOW) for line in lines)
+    ev = [f"Dialogue: 4,{t0},{t1},Pop,,0,0,0,,{{\\an8\\pos(540,{y0})\\fs{fs}\\frz{ang}\\org(540,{cy:.0f})}}{body}"]
+    width = max(len(line) for line in lines) * fs * 0.43  # approximate text width (Montserrat Black)
+    sl = min(width * 0.85, 640)
+    sx, sy = rot(540, y0 + n * lh + 10)
+    ev.append(f"Dialogue: 3,{t0},{t1},Draw,,0,0,0,,{{\\an7\\pos({sx - sl / 2:.0f},{sy:.0f})\\frz{ang}{draw}}}"
+              f"m 0 10 b {sl * .3:.0f} 0 {sl * .7:.0f} -4 {sl:.0f} 0 l {sl:.0f} 7 b {sl * .7:.0f} 5 {sl * .3:.0f} 10 0 20{{\\p0}}")
+    lx, ly = rot(540 - len(lines[0]) * fs * 0.43 / 2 - 22, y0 + lh * 0.5)
+    rx, ry = rot(540 + len(lines[-1]) * fs * 0.43 / 2 + 22, y0 + lh * (n - 0.5))
+    ev.append(f"Dialogue: 3,{t0},{t1},Draw,,0,0,0,,{{\\an7\\pos(0,0){draw}}}"
+              f"{spark(lx, ly, [180, 215, 145])} {spark(rx, ry, [0, 35, -35])}{{\\p0}}")
+    hy = y0 + n * lh + 58
+    if watermark:
+        ev.append(f"Dialogue: 2,{t0},{t1},PopHandle,,0,0,0,,{{\\an8\\pos(540,{hy:.0f})}}{ass_escape(watermark)}")
+        hl = 260
+        ev.append(f"Dialogue: 2,{t0},{t1},Draw,,0,0,0,,{{\\an7\\pos({540 - hl / 2:.0f},{hy + 50:.0f})"
+                  f"\\1c{POP_YELLOW}\\bord0\\shad0\\p1}}m 0 6 b 78 0 182 -2 {hl} 0 l {hl} 4 b 182 3 78 7 0 11{{\\p0}}")
+    if credit:
+        ev.append(f"Dialogue: 1,{t0},{t1},PopCredit,,0,0,0,,{{\\an8\\pos(540,{hy + 66:.0f})}}{ass_escape(credit)}")
+    return ev
 
 
 def build_clip_ass(words: list[dict], hook: str, hook_seconds: float, watermark: str, credit: str,
                    duration: float, layout: dict, words_per_caption: int = 3, top_text: str = "",
-                   top_accent: str = "") -> str:
+                   top_accent: str = "", top_style: str = "pop") -> str:
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {W}
@@ -440,7 +494,11 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = []
-    if top_text:  # meme-style line that frames the clip for its whole length (replaces the hook)
+    if top_text and top_style == "pop":  # tilted meme line + handle + credit, all above the clip
+        hook = ""
+        lines += pop_top_events(top_text, top_accent, watermark, credit, duration)
+        watermark = credit = ""
+    elif top_text:  # meme-style line that frames the clip for its whole length (replaces the hook)
         hook = ""
         wrapped = "\\N".join(accent_words(line, top_accent) for line in balanced_wrap(ass_escape(top_text), 20))
         lines.append(f"Dialogue: 3,{ass_time(0)},{ass_time(duration)},Top,,0,0,0,,{wrapped}")
@@ -539,7 +597,7 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     (job_dir / "subs.ass").write_text(build_clip_ass(
         words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), params.get("credit", ""),
         duration, clip_layout(fg_h), int(params.get("words_per_caption", 3)), params.get("top_text", ""),
-        params.get("top_accent", "")))
+        params.get("top_accent", ""), params.get("top_style", "pop")))
 
     t = f"(on/{FPS})"
     zoom = f"1+0.06*{t}/{duration:.3f}"
