@@ -8,10 +8,10 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 
 ## Domani, dopo il controllo della prima pubblicazione automatica
 - [x] Telegram: resoconto serale (05 Daily Report, 20:20 New York), avvisi di errore (00), "Reel pubblicato / fallito" (03).
-- [ ] Stile ispirato a @jakeetimberlake:
-  - [ ] frase meme fissa (2-5 parole, ironica) per tutto il video, al posto dell'hook che sparisce;
-  - [ ] voce AI opzionale, per un A/B test con e senza voce;
-  - [ ] clip fino a 60 s quando la scena lo richiede.
+- [x] Stile ispirato a @jakeetimberlake: frase meme fissa (`factory_text_style`), voce AI al 50% per A/B test
+  (`factory_voice_ratio`, colonna `style_variant`), clip fino a 60 s (`factory_max_segment_s`), sottotitoli del
+  parlato nei Reel senza voce.
+- [ ] Dopo 1-2 settimane: confrontare `meme+voice` vs `meme+novoice` con 04 Analytics e fissare la percentuale.
 
 ## Dopo 1-2 giorni di pubblicazioni senza errori
 - [ ] Fonte Kick (Adin Ross, xQc e altri): parte di ricerca nel Discovery (il worker scarica già le clip Kick).
