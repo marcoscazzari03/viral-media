@@ -16,7 +16,7 @@ Exports (backups, importable in n8n) are in [`n8n/workflows/`](n8n/workflows/). 
 |---|---|---|
 | `00 - US VIRAL \| Error Handler` | on error | Logs failed runs in `viral_runs` and sends a Telegram alert. Error workflow of all the others. |
 | `01 - US VIRAL \| Discovery Engine` | every 2 h at :07 | Polls Twitch clips and YouTube sources, scores them (velocity, outperformance, acceleration, engagement, recency, priority), keeps `viral_candidates` up to date (ELIGIBLE / EXPIRED / ...). |
-| `02 - US VIRAL \| Reel Factory` | every 2 h at :37 | Picks the best ELIGIBLE clip, transcribes it, one Claude call for meme line / hook / caption / segment, renders the Reel on the media worker. Saves it as READY in `viral_posts`. |
+| `02 - US VIRAL \| Reel Factory` | every 2 h at :37 | Picks the best ELIGIBLE clip, transcribes it, one Claude call for meme line (+ key word) / hook / caption / segment, renders the Reel and its designed cover on the media worker. Saves it as READY in `viral_posts`. |
 | `03 - US VIRAL \| Publisher` | :05 at 11, 12, 15, 16, 19, 20 | Publishes the best READY Reel on Instagram in the slots `publish_slots_et` (11, 15, 19), with daily cap and min gap. The hour after each slot resumes a video Instagram is still processing. Telegram message on publish / failure. Facebook Page gets the Reel through Meta auto-share. |
 | `04 - US VIRAL \| Analytics` | every 6 h at :25 | Instagram insights of the Reels of the last 7 days (`viral_post_metrics`) and followers (`viral_account_metrics`). |
 | `05 - US VIRAL \| Daily Report` | 20:20 | Telegram summary of the day and, when fewer Reels than planned, the likely reasons. |
@@ -43,6 +43,14 @@ n8n plan limit of 2,500 a month shared with all other workflows of the instance.
 `US VIRAL - Instagram`, `US VIRAL - Telegram`, `US VIRAL - YouTube` (custom Google OAuth2 client, uploads),
 `US VIRAL - YouTube API Key` (discovery), `US VIRAL - Twitch API`, `US VIRAL - Anthropic`, `US VIRAL - Media Worker`.
 Exports keep credential names and ids only; the Telegram chat id is replaced by `YOUR_TELEGRAM_CHAT_ID`.
+
+## Reel style
+
+Clip Reels (1080×1920): the clip in the centre over a blurred copy of itself, slow zoom + a punch zoom on the key
+moment, big word-by-word captions. Above the clip, the "pop" meme line for the whole Reel: Montserrat Black,
+tilted, key word in yellow, yellow swoosh and sparks, then the page handle and the streamer credit. The AI
+voice-over plays on about half of the Reels (A/B test, `style_variant`). Each Reel gets a designed Instagram cover
+(punch-moment frame full screen, pop title, streamer name, handle) laid out for the 3:4 profile grid.
 
 ## Media worker
 

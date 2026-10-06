@@ -11,12 +11,19 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [x] Stile ispirato a @jakeetimberlake: frase meme fissa (`factory_text_style`), voce AI al 50% per A/B test
   (`factory_voice_ratio`, colonna `style_variant`), clip fino a 60 s (`factory_max_segment_s`), sottotitoli del
   parlato nei Reel senza voce.
-- [ ] Dopo 1-2 settimane: confrontare `meme+voice` vs `meme+novoice` con 04 Analytics e fissare la percentuale.
+- [x] Stile "pop" della frase meme (6 ottobre): font Montserrat, testo inclinato, parola chiave in giallo scelta da
+  Claude (`meme_accent`), sottolineatura e scintille, @handle sottolineato. `style_variant` = `memepop+voice` /
+  `memepop+novoice` (prima `meme+...`).
+- [x] Copertina Instagram disegnata (6 ottobre): fotogramma del momento più forte a tutto schermo, frase pop,
+  nome dello streamer, @handle; tutto dentro l'area 3:4 visibile nella griglia del profilo.
+- [ ] Dopo 1-2 settimane: confrontare le varianti (`memepop+voice` / `memepop+novoice`, e i vecchi `meme+...`)
+  con 04 Analytics e fissare la percentuale di voce.
+- [ ] Varianti da testare dopo: video a schermo pieno (lati tagliati) e "facecam sopra" per gli streamer con
+  facecam fissa. Più avanti: nome del gioco nella copertina ("ASMONGOLD x WOW").
 
 ## Dopo 1-2 giorni di pubblicazioni senza errori
 - [ ] Fonte Kick (Adin Ross, xQc e altri): parte di ricerca nel Discovery (il worker scarica già le clip Kick).
 - [ ] Fonte YouTube (IShowSpeed e live): attivare il ramo YouTube nella Factory, con più cautela sui diritti.
-- [ ] Layout gaming: facecam sopra, gioco sotto.
 
 ## TikTok (@viralstreamersdaily)
 - [x] App "US Viral Publisher" su developers.tiktok.com, dominio media.weborastudio.it verificato, pagine legali.
@@ -35,8 +42,9 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [x] Pubblicazione su Pagina Facebook (condivisione automatica Meta; da verificare sui primi Reel).
 - [x] YouTube Shorts: canale creato, workflow 06 testato in privato, audit API inviato (6 ottobre).
 - [ ] Dopo l'approvazione dell'audit YouTube: `yt_enabled` = 1, `yt_privacy` = public, attivare il workflow 06.
-- [ ] Svuotare `yt_force_post_key` in `viral_config` (resta il post di test).
+- [x] Svuotato `yt_force_post_key` in `viral_config`.
 - [ ] Avviso scadenza token Instagram (intorno al 4 dicembre).
 - [ ] Learning loop quando ci sono 5-10 Reel pubblicati.
+- [ ] `has_burned_captions` = true per Asmongold (`twitch:zackrawrr`) in `viral_sources`: i suoi stream hanno già i sottotitoli.
 - [ ] Rilevamento automatico dei sottotitoli già impressi nelle clip.
 - [ ] Sistema multi-pagina (colonna `page`) dopo 2-3 settimane; seconda nicchia da scegliere (gaming/FPS o Tech in formato notizia).
