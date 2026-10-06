@@ -34,9 +34,8 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [ ] Rigenerare `API_TOKEN` del server e secret TikTok Sandbox (sono passati in chat).
 
 ## Blocco Meta (6 ottobre)
-- [ ] Pubblicazione Instagram via API bloccata ("API access blocked", primo tentativo 17:05): verifica di sicurezza
-  sull'account Facebook (loop di login da PC). `publish_enabled` = 0, Reel pubblicati a mano dal pannello
-  (poi status `PUBLISHED` in viral_posts).
+- [x] Pubblicazione Instagram via API bloccata ("API access blocked", 17:05): risolta completando la verifica
+  dell'account Facebook. Primo Reel pubblicato via API il 7 ottobre all'01:06 (Jynxzi, layout webcam).
 - [ ] Valori temporanei per far lavorare la Factory a pubblicazione spenta: `factory_max_reels_per_day` = 6,
   `publish_max_per_day` = 5. **Alla ripartenza rimettere 3 e 2**, poi `publish_enabled` = 1 dopo un solo test.
 - [ ] Il Reel CaseOh "lol" è in PUBLISH_FAILED (vecchio stile): non ripubblicarlo.
