@@ -45,6 +45,6 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [x] Svuotato `yt_force_post_key` in `viral_config`.
 - [ ] Avviso scadenza token Instagram (intorno al 4 dicembre).
 - [ ] Learning loop quando ci sono 5-10 Reel pubblicati.
-- [ ] `has_burned_captions` = true per Asmongold (`twitch:zackrawrr`) in `viral_sources`: i suoi stream hanno già i sottotitoli.
+- [x] `has_burned_captions` = true per Asmongold (`twitch:zackrawrr`) in `viral_sources`: i suoi stream hanno già i sottotitoli.
 - [ ] Rilevamento automatico dei sottotitoli già impressi nelle clip.
 - [ ] Sistema multi-pagina (colonna `page`) dopo 2-3 settimane; seconda nicchia da scegliere (gaming/FPS o Tech in formato notizia).
