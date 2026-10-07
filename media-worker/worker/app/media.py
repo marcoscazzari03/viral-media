@@ -1051,6 +1051,8 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
             subs_boxes = detect_burned_subs(job_dir, src, sw, sh, src_dur)
         except Exception:
             subs_boxes = []
+        if not subs_boxes:  # theirs not found: no full captions over them (only our voice-over is captioned)
+            words = [w for w in words if w.get("src") != "clip"]
         for b in subs_boxes:
             cy = b["y"] + b["h"] / 2
             if cam:  # gameplay panel: the full source height scaled to GAME_H under the webcam
