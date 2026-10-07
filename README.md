@@ -17,9 +17,10 @@ Exports (backups, importable in n8n) are in [`n8n/workflows/`](n8n/workflows/). 
 | `00 - US VIRAL \| Error Handler` | on error | Logs failed runs in `viral_runs` and sends a Telegram alert. Error workflow of all the others. |
 | `01 - US VIRAL \| Discovery Engine` | every 2 h at :07 | Polls Twitch clips and YouTube sources, scores them (velocity, outperformance, acceleration, engagement, recency, priority), keeps `viral_candidates` up to date (ELIGIBLE / EXPIRED / ...). |
 | `02 - US VIRAL \| Reel Factory` | every 2 h at :37 | Picks the best ELIGIBLE clip, transcribes it, one Claude call for meme line (+ key word) / hook / caption / segment, renders the Reel and its designed cover on the media worker. Saves it as READY in `viral_posts`. |
-| `03 - US VIRAL \| Publisher` | :05 at 11, 12, 15, 16, 19, 20 | Publishes the best READY Reel on Instagram in the slots `publish_slots_et` (11, 15, 19), with daily cap and min gap. The hour after each slot resumes a video Instagram is still processing. Telegram message on publish / failure. Facebook Page gets the Reel through Meta auto-share. |
+| `03 - US VIRAL \| Publisher` | :05 at 11, 12, 15, 16, 19, 20 | Publishes the best READY Reel on Instagram in the slots `publish_slots_et` (11, 15, 19), with daily cap and min gap. The hour after each slot resumes a video Instagram is still processing. Telegram message on publish / failure. |
 | `04 - US VIRAL \| Analytics` | every 6 h at :25 | Instagram insights of the Reels of the last 7 days (`viral_post_metrics`) and followers (`viral_account_metrics`). |
 | `05 - US VIRAL \| Daily Report` | 20:20 | Telegram summary of the day and, when fewer Reels than planned, the likely reasons. |
+| `07 - US VIRAL \| Facebook Publisher` | :35 at 12, 16, 20 | Publishes the Reels already on Instagram as Reels on the Facebook Page (Meta does not share API-published posts to the Page). **Inactive** until the Page token credential is set. |
 | `06 - US VIRAL \| YouTube Publisher` | :20 at 12, 16, 20 | Uploads the Reels already published on Instagram as YouTube Shorts. **Inactive** until the YouTube API audit is approved. |
 
 If `publish_slots_et` changes, update the schedule of 03 and 06 too.
@@ -65,7 +66,7 @@ platforms, TikTok login and publishing page (`/panel`), legal pages (`/legal/`).
 | Platform | How | Status |
 |---|---|---|
 | Instagram | 03 Publisher (Instagram Graph API) | automatic, 2 Reels a day |
-| Facebook Page | Meta auto-share from Instagram | automatic |
+| Facebook Page | 07 Facebook Publisher (Page Reels API) | waiting for the Page token, manual "Share to Facebook" meanwhile |
 | YouTube Shorts | 06 YouTube Publisher (YouTube Data API v3) | waiting for API audit, manual upload meanwhile |
 | TikTok | worker `/panel` + `/tiktok/post` (Content Posting API) | waiting for app review, drafts / manual upload meanwhile |
 

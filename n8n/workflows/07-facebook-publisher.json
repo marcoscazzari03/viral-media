@@ -1,0 +1,550 @@
+{
+  "name": "07 - US VIRAL | Facebook Publisher",
+  "nodes": [
+    {
+      "id": "81bd4911-b262-4bd5-b9a3-575cfe90f547",
+      "name": "After Slots 12-16-20 NY :35",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        96
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "35 12,16,20 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a2796409-a9d3-46e3-afa7-b026c2fd3ecc",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "K9NPI0QIqVOkuHD1",
+          "cachedResultName": "viral_config"
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "908fbb70-f868-46ed-8d74-6395e1a43714",
+      "name": "Get Posts",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "returnAll": true
+      },
+      "notes": "All posts (small table): the pick filters by status and date.",
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "e15749c3-c343-4fd6-8d62-c5a6dd1bef0e",
+      "name": "Pick for Facebook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Pick for Facebook — which Reel to publish on the Facebook Page this run. Pure rules, no AI.\n// Meta does not share API-published Instagram Reels to the Page, so we publish them there ourselves.\n//  - forced test post (fb_force_post_key): any READY/PUBLISHED post with a video, once, even if fb_enabled = 0;\n//  - otherwise, when fb_enabled = 1: the oldest Reel already PUBLISHED on Instagram in the last 48h and not yet on\n//    the Page (no fb_video_id, no fb_error).\n// 0 items = nothing to do.\n\nconst rows = $('Load Config').all().map(i => i.json ?? {});\nconst val = (key, def) => {\n  const r = rows.find(x => x.key === key);\n  if (!r) return def;\n  if (typeof def === 'number') return Number.isFinite(Number(r.value_number)) && r.value_number !== null ? Number(r.value_number) : def;\n  return (r.value_string ?? '').trim() || def;\n};\nconst cfg = {\n  enabled: val('fb_enabled', 0) ? 1 : 0,\n  pageId: val('fb_page_id', ''),\n  version: val('fb_api_version', 'v23.0'),\n  force: val('fb_force_post_key', ''),\n  chatId: val('telegram_chat_id', ''),\n};\nif (!cfg.pageId) {\n  console.log('fb_page_id missing in viral_config: nothing to do');\n  return [];\n}\n\nconst ageH = iso => (Date.now() - Date.parse(iso ?? '')) / 3.6e6;\nconst posts = $input.all().map(i => i.json ?? {}).filter(p => p.post_key && p.video_url);\n\nlet pick = null, reason = '';\nif (cfg.force) {\n  pick = posts.find(p => p.post_key === cfg.force && !p.fb_video_id && ['READY', 'PUBLISHED'].includes(p.status));\n  reason = pick ? 'forced by fb_force_post_key' : '';\n  if (!pick) console.log(`forced post ${cfg.force} not found or already on Facebook: clear fb_force_post_key`);\n}\nif (!pick && cfg.enabled) {\n  const queue = posts\n    .filter(p => p.status === 'PUBLISHED' && !p.fb_video_id && !p.fb_error && ageH(p.published_at) <= 48)\n    .sort((a, b) => Date.parse(a.published_at) - Date.parse(b.published_at));\n  pick = queue[0] ?? null;\n  reason = pick ? `oldest of ${queue.length} published on Instagram, not yet on Facebook` : '';\n}\nif (!pick) return [];\n\nconst clean = s => String(s ?? '').replace(/\\s+/g, ' ').trim();\nreturn [{\n  json: {\n    post_key: pick.post_key,\n    video_url: pick.video_url,\n    title: clean(pick.meme_caption || pick.hook || pick.title) || 'Streamer moment',\n    creator_name: clean(pick.creator_name),\n    description: String(pick.caption ?? '').trim().slice(0, 2000),\n    reason,\n    page_id: cfg.pageId,\n    graph: `https://graph.facebook.com/${cfg.version}`,\n    rupload: `https://rupload.facebook.com/video-upload/${cfg.version}`,\n    chat_id: cfg.chatId,\n  },\n}];\n"
+      },
+      "notes": "0 items = nothing to publish this run."
+    },
+    {
+      "id": "4cc7a6d4-b831-4dd7-b7b7-b44904375125",
+      "name": "FB Start Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        896,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.graph }}/{{ $json.page_id }}/video_reels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "upload_phase",
+              "value": "start"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "notes": "Creates the Reel on the Page and returns its video_id.",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "5050c717-ddad-448d-9f7a-2d13abc2bbcd",
+      "name": "FB Upload From URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Pick for Facebook').item.json.rupload }}/{{ $('FB Start Upload').item.json.video_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "file_url",
+              "value": "={{ $('Pick for Facebook').item.json.video_url }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "notes": "Facebook downloads the Reel from the worker URL (file_url header).",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a1d535d8-3ae8-48e9-994d-3beaa21adb5d",
+      "name": "FB Publish Reel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Pick for Facebook').item.json.graph }}/{{ $('Pick for Facebook').item.json.page_id }}/video_reels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "upload_phase",
+              "value": "finish"
+            },
+            {
+              "name": "video_id",
+              "value": "={{ $('FB Start Upload').item.json.video_id }}"
+            },
+            {
+              "name": "video_state",
+              "value": "PUBLISHED"
+            },
+            {
+              "name": "description",
+              "value": "={{ $('Pick for Facebook').item.json.description }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "notes": "upload_phase=finish + video_state=PUBLISHED: Facebook publishes the Reel when processing ends.",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "013c723f-3a54-43a4-9576-408fc7e32d2e",
+      "name": "Published?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1568,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.success === true && !!$('FB Start Upload').item.json.video_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "f3859504-86e5-4bb2-aacc-ea63562baacd",
+      "name": "Save Facebook Id",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1792,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "condition": "eq",
+              "keyValue": "={{ $('Pick for Facebook').item.json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "fb_video_id": "={{ $('FB Start Upload').item.json.video_id }}",
+            "fb_published_at": "={{ $now.toISO() }}",
+            "fb_error": ""
+          }
+        }
+      }
+    },
+    {
+      "id": "e1a748ba-b599-419a-a5cd-56022fdf1daf",
+      "name": "Notify Facebook",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2016,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Pick for Facebook').item.json.chat_id }}",
+        "text": "={{ '📘 <b>Reel sulla Pagina Facebook</b>\\n' + ($('Pick for Facebook').item.json.creator_name + ' — ' + $('Pick for Facebook').item.json.title).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '\\nhttps://www.facebook.com/reel/' + $('FB Start Upload').item.json.video_id }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "webhookId": "cc03b6f7-3173-4cff-bd96-432c1892b521",
+      "credentials": {
+        "telegramApi": {
+          "id": "fwidLBAWY5ihOfTY",
+          "name": "US VIRAL - Telegram"
+        }
+      }
+    },
+    {
+      "id": "34eb444d-7249-42d9-989d-814062581fbb",
+      "name": "Save Facebook Error",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1792,
+        192
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "condition": "eq",
+              "keyValue": "={{ $('Pick for Facebook').item.json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "fb_error": "={{ String($('FB Publish Reel').item.json.error?.message ?? $('FB Upload From URL').item.json.error?.message ?? $('FB Start Upload').item.json.error?.message ?? JSON.stringify($('FB Publish Reel').item.json)).slice(0, 500) }}"
+          }
+        }
+      },
+      "notes": "fb_error set: the post is not retried automatically (clear it to retry)."
+    },
+    {
+      "id": "214a13b6-2832-4693-b21f-7733b6465460",
+      "name": "Notify Facebook Failed",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2016,
+        192
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Pick for Facebook').item.json.chat_id }}",
+        "text": "={{ '❌ <b>Reel su Facebook non pubblicato</b>\\n' + ($('Pick for Facebook').item.json.creator_name + ' — ' + $('Pick for Facebook').item.json.title + '\\n' + String($('FB Publish Reel').item.json.error?.message ?? $('FB Upload From URL').item.json.error?.message ?? $('FB Start Upload').item.json.error?.message ?? JSON.stringify($('FB Publish Reel').item.json)).slice(0, 500)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "webhookId": "2d997405-f5af-4e60-b56a-146551d94c87",
+      "credentials": {
+        "telegramApi": {
+          "id": "fwidLBAWY5ihOfTY",
+          "name": "US VIRAL - Telegram"
+        }
+      }
+    },
+    {
+      "id": "02507856-ec2e-4214-9eee-58ca898ce61b",
+      "name": "Sticky Note 51105ac6",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        944,
+        192
+      ],
+      "parameters": {
+        "content": "## US VIRAL Facebook Publisher\n12:35, 16:35, 20:35 New York (after the Instagram slots): publishes the oldest Reel already on Instagram (last 48h) as a Reel on the Facebook Page (Meta does not share API posts to the Page).\nviral_config: fb_enabled, fb_page_id, fb_api_version, fb_force_post_key (test). Credential: US VIRAL - Facebook Page (header Authorization: OAuth <page token>).",
+        "color": 5
+      }
+    }
+  ],
+  "connections": {
+    "After Slots 12-16-20 NY :35": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Get Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Posts": {
+      "main": [
+        [
+          {
+            "node": "Pick for Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick for Facebook": {
+      "main": [
+        [
+          {
+            "node": "FB Start Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Start Upload": {
+      "main": [
+        [
+          {
+            "node": "FB Upload From URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Upload From URL": {
+      "main": [
+        [
+          {
+            "node": "FB Publish Reel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Publish Reel": {
+      "main": [
+        [
+          {
+            "node": "Published?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Published?": {
+      "main": [
+        [
+          {
+            "node": "Save Facebook Id",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Facebook Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Facebook Id": {
+      "main": [
+        [
+          {
+            "node": "Notify Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Facebook Error": {
+      "main": [
+        [
+          {
+            "node": "Notify Facebook Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "LfLwNkCRfJgGmxUr",
+    "timezone": "America/New_York",
+    "saveManualExecutions": true,
+    "executionTimeout": 280
+  },
+  "description": "US VIRAL Facebook Publisher: after the Instagram slots, publishes the Reels already on Instagram as Reels on the Facebook Page (Meta does not share API posts). fb_enabled, fb_page_id, fb_force_post_key (test).",
+  "nodeGroups": [
+    {
+      "id": "dbb3be98-3538-4138-8c8e-b54a065aac32",
+      "name": "Pick",
+      "nodeNames": [
+        "Load Config",
+        "Get Posts",
+        "Pick for Facebook"
+      ],
+      "description": "Config + posts: oldest Reel already on Instagram, not yet on the Facebook Page (or the forced test post)"
+    },
+    {
+      "id": "4cd230b6-26ad-4a42-af0a-8c9b1e467477",
+      "name": "Publish on Facebook",
+      "nodeNames": [
+        "FB Start Upload",
+        "FB Upload From URL",
+        "FB Publish Reel"
+      ],
+      "description": "Page Reels API: start, Facebook pulls the video from the worker URL, finish + PUBLISHED"
+    },
+    {
+      "id": "18d9ec19-db0a-4ab8-a31e-dca9eed8ba98",
+      "name": "Published",
+      "nodeNames": [
+        "Save Facebook Id",
+        "Notify Facebook"
+      ],
+      "description": "Save fb_video_id + Telegram"
+    },
+    {
+      "id": "7cc5b434-a156-4c44-8b5f-63b7b075428c",
+      "name": "Failed",
+      "nodeNames": [
+        "Save Facebook Error",
+        "Notify Facebook Failed"
+      ],
+      "description": "Save fb_error (no retry) + Telegram"
+    }
+  ],
+  "meta": {
+    "n8n_id": "gAlGTzTrwqd4Gqhu",
+    "versionId": "d1708310-b774-4e35-8cbc-acf56d4c055d",
+    "active": false,
+    "exported_from_updatedAt": "2026-10-07T14:29:09.933Z"
+  }
+}
