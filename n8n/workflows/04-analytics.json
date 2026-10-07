@@ -43,7 +43,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Init Analytics — run context + typed config (viral_config). Missing keys fall back to DEFAULTS.\n\nconst DEFAULTS = {\n  ig_user_id: '',\n  ig_api_version: 'v23.0',\n  analytics_track_days: 7,\n  yt_channel_handle: '@viralstreamersdaily',\n  ig_reel_metrics: 'views,reach,likes,comments,shares,saved,total_interactions,ig_reels_avg_watch_time,ig_reels_video_view_total_time',\n};\n\nconst config = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json;\n  const key = String(r.key ?? '').trim();\n  if (!(key in DEFAULTS)) continue;\n  const hasNum = r.value_number !== null && r.value_number !== undefined && Number.isFinite(Number(r.value_number));\n  const hasStr = typeof r.value_string === 'string' && r.value_string.trim() !== '';\n  if (typeof DEFAULTS[key] === 'number') { if (hasNum) config[key] = Number(r.value_number); }\n  else if (hasStr) config[key] = r.value_string.trim();\n}\nconfig.ig_reel_metrics = config.ig_reel_metrics.split(',').map(s => s.trim()).filter(Boolean).join(',');\n\nreturn [{\n  json: {\n    run_id: `ana-${$now.toFormat('yyyyMMdd-HHmm')}-${$execution.id}`,\n    started_at: new Date().toISOString(),\n    graph: `https://graph.instagram.com/${config.ig_api_version}`,\n    config,\n  },\n}];\n"
+        "jsCode": "// Init Analytics — run context + typed config (viral_config). Missing keys fall back to DEFAULTS.\n\nconst DEFAULTS = {\n  ig_user_id: '',\n  ig_api_version: 'v23.0',\n  analytics_track_days: 7,\n  yt_channel_handle: '@viralstreamersdaily',\n  fb_page_id: '',\n  fb_api_version: 'v23.0',\n  ig_reel_metrics: 'views,reach,likes,comments,shares,saved,total_interactions,ig_reels_avg_watch_time,ig_reels_video_view_total_time',\n};\n\nconst config = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json;\n  const key = String(r.key ?? '').trim();\n  if (!(key in DEFAULTS)) continue;\n  const hasNum = r.value_number !== null && r.value_number !== undefined && Number.isFinite(Number(r.value_number));\n  const hasStr = typeof r.value_string === 'string' && r.value_string.trim() !== '';\n  if (typeof DEFAULTS[key] === 'number') { if (hasNum) config[key] = Number(r.value_number); }\n  else if (hasStr) config[key] = r.value_string.trim();\n}\nconfig.ig_reel_metrics = config.ig_reel_metrics.split(',').map(s => s.trim()).filter(Boolean).join(',');\n\nreturn [{\n  json: {\n    run_id: `ana-${$now.toFormat('yyyyMMdd-HHmm')}-${$execution.id}`,\n    started_at: new Date().toISOString(),\n    graph: `https://graph.instagram.com/${config.ig_api_version}`,\n    config,\n  },\n}];\n"
       },
       "id": "42fe4581-95dc-4c78-85e2-c07e04a146da",
       "name": "Init Analytics",
@@ -793,6 +793,507 @@
         1328,
         1160
       ]
+    },
+    {
+      "name": "FB Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        1400
+      ],
+      "notes": "Page followers (Page token). 1 call.",
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.facebook.com/' + $('Init Analytics').first().json.config.fb_api_version }}/{{ $('Init Analytics').first().json.config.fb_page_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "followers_count,fan_count"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7yCG6wcXqjOxd9rb",
+          "name": "US VIRAL - Facebook Page"
+        }
+      },
+      "id": "eec4d0e7-59c2-46eb-9fe2-da1c3f19244b",
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "FB Followers OK",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        1104,
+        1320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.followers_count !== undefined }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "28b46904-13f7-470a-a4f0-20aebd508904"
+    },
+    {
+      "name": "Save FB Followers",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1328,
+        1320
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "vqjHMIflVZuF6DRf",
+          "cachedResultName": "viral_account_metrics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "captured_at": "={{ $now.toISO() }}",
+            "platform": "facebook",
+            "followers_count": "={{ $json.followers_count }}",
+            "run_id": "={{ $('Init Analytics').first().json.run_id }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "b79bdc34-db65-491a-88c5-64c97065e7ff"
+    },
+    {
+      "name": "FB Earnings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1104,
+        1520
+      ],
+      "notes": "Page earnings (content monetization). Error = not available / not monetized.",
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.facebook.com/' + $('Init Analytics').first().json.config.fb_api_version }}/{{ $('Init Analytics').first().json.config.fb_page_id }}/insights",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "metric",
+              "value": "content_monetization_earnings"
+            },
+            {
+              "name": "period",
+              "value": "day"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7yCG6wcXqjOxd9rb",
+          "name": "US VIRAL - Facebook Page"
+        }
+      },
+      "id": "bf204137-232f-4b3e-9ce5-82e00ff3ebf5",
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "FB Reels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1104,
+        1420
+      ],
+      "notes": "Latest 25 Reels of the Page (API and shared by hand).",
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.facebook.com/' + $('Init Analytics').first().json.config.fb_api_version }}/{{ $('Init Analytics').first().json.config.fb_page_id }}/video_reels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,description,created_time"
+            },
+            {
+              "name": "limit",
+              "value": "25"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7yCG6wcXqjOxd9rb",
+          "name": "US VIRAL - Facebook Page"
+        }
+      },
+      "id": "184c164d-5e89-46e8-a7bd-449f70d00c69",
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "FB Match Reels",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        1420
+      ],
+      "notes": "Links Reels shared by hand; one item per post on Facebook.",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// FB Match Reels — links the Reels shared on the Page by hand (fb_video_id empty or \"manual\") to their post, from\n// the Page's latest Reels: not linked to another post, up 12h before to 72h after the Instagram post, and the\n// description mentions the caption's first line, the meme line or the streamer. Then one item per post with a\n// Facebook video id (for the insights); link_new = true for the new links.\n\nconst posts = $('Get Published').all().map(i => ({ ...(i.json ?? {}) }));\nconst reels = ($input.first().json.data ?? []).map(r => ({\n  id: String(r.id ?? ''), at: Date.parse(r.created_time ?? ''), text: String(r.description ?? ''),\n})).filter(r => /^\\d+$/.test(r.id) && Number.isFinite(r.at));\n\nconst isFbId = v => /^\\d+$/.test(String(v ?? '').trim());\nconst norm = s => String(s ?? '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim();\nconst used = new Set(posts.filter(p => isFbId(p.fb_video_id)).map(p => String(p.fb_video_id).trim()));\nconst score = (p, r) => {\n  const t = ` ${norm(r.text)} `;\n  let s = 0;\n  for (const v of [String(p.caption ?? '').split('\\n')[0], p.meme_caption, p.hook]) {\n    const n = norm(v);\n    if (n.length >= 6 && t.includes(` ${n} `)) s = Math.max(s, 3);\n  }\n  const c = norm(p.creator_name);\n  if (c && t.includes(` ${c} `)) s += 1;\n  return s;\n};\n\nfor (const p of posts.sort((a, b) => Date.parse(a.published_at) - Date.parse(b.published_at))) {\n  if (isFbId(p.fb_video_id)) continue;\n  const pub = Date.parse(p.published_at);\n  if (!Number.isFinite(pub)) continue;\n  const best = reels\n    .filter(r => !used.has(r.id) && r.at >= pub - 12 * 3.6e6 && r.at <= pub + 72 * 3.6e6)\n    .map(r => ({ r, s: score(p, r), d: Math.abs(r.at - pub) }))\n    .filter(x => x.s > 0)\n    .sort((a, b) => b.s - a.s || a.d - b.d)[0];\n  if (!best) continue;\n  used.add(best.r.id);\n  p.fb_video_id = best.r.id;\n  p.fb_published_at = new Date(best.r.at).toISOString();\n  p.link_new = true;\n}\n\nreturn posts.filter(p => isFbId(p.fb_video_id)).map(p => ({ json: {\n  post_key: p.post_key, source_key: p.source_key, fb_video_id: String(p.fb_video_id).trim(),\n  published_at: p.fb_published_at || p.published_at, link_new: p.link_new === true,\n} }));\n"
+      },
+      "id": "313591a0-72f5-4107-8e2f-0665394b4a62"
+    },
+    {
+      "name": "New FB Links",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        1552,
+        1520
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.link_new === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "314af5a4-50b1-4d76-b89d-37d8e77a43a5"
+    },
+    {
+      "name": "Save FB Link",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1776,
+        1520
+      ],
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "fb_video_id": "={{ $json.fb_video_id }}",
+            "fb_published_at": "={{ $json.published_at }}",
+            "fb_error": ""
+          }
+        },
+        "options": {}
+      },
+      "id": "70b37a26-b2d1-4919-b547-dcc37170240a"
+    },
+    {
+      "name": "FB Insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1552,
+        1420
+      ],
+      "notes": "One call per Facebook Reel (lifetime).",
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.facebook.com/' + $('Init Analytics').first().json.config.fb_api_version }}/{{ $json.fb_video_id }}/video_insights",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "metric",
+              "value": "fb_reels_total_plays,blue_reels_play_count,post_video_likes_by_reaction_type,post_video_social_actions,post_video_avg_time_watched,post_video_view_time"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7yCG6wcXqjOxd9rb",
+          "name": "US VIRAL - Facebook Page"
+        }
+      },
+      "id": "44c4b061-459d-4e6d-8067-8d96c92854e1",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "name": "Map FB Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        1420
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Map FB Metrics — one snapshot row per Facebook Reel from video_insights (lifetime values).\n// Values can be numbers or objects (reactions by type, actions by type): objects are summed.\n\nconst run = $('Init Analytics').first().json;\nconst items = $('FB Match Reels').all();\nconst sum = v => (v && typeof v === 'object' ? Object.values(v).reduce((a, b) => a + (Number(b) || 0), 0)\n  : (Number.isFinite(Number(v)) ? Number(v) : null));\nconst nowIso = new Date().toISOString();\n\nreturn $input.all().map((it, i) => {\n  const post = items[i]?.json ?? {};\n  const res = it.json ?? {};\n  const m = {};\n  for (const d of res.data ?? []) m[d.name] = d.values?.[0]?.value;\n  const actions = m.post_video_social_actions && typeof m.post_video_social_actions === 'object' ? m.post_video_social_actions : {};\n  const ageH = (Date.now() - Date.parse(post.published_at)) / 3.6e6;\n  return { json: {\n    post_key: post.post_key, platform: 'facebook', platform_video_id: post.fb_video_id, source_key: post.source_key,\n    captured_at: nowIso, age_h: Number.isFinite(ageH) ? Math.round(ageH * 10) / 10 : null,\n    views: sum(m.fb_reels_total_plays ?? m.blue_reels_play_count),\n    reach: sum(m.blue_reels_play_count),  // plays without replays (Facebook has no reach metric for Reels)\n    likes: sum(m.post_video_likes_by_reaction_type),\n    comments: sum(actions.COMMENT ?? actions.comment ?? 0),\n    shares: sum(actions.SHARE ?? actions.share ?? 0),\n    avg_watch_ms: sum(m.post_video_avg_time_watched),\n    total_watch_ms: sum(m.post_video_view_time),\n    run_id: run.run_id,\n    error: res.error ? String(res.error.message ?? res.error).slice(0, 300) : '',\n  } };\n});\n"
+      },
+      "id": "24951079-eded-487a-8a00-0216afed2d15"
+    },
+    {
+      "name": "FB Metrics OK",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        2000,
+        1420
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !$json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c33b074c-5048-4d42-8b6c-611230c03f57"
+    },
+    {
+      "name": "Save FB Snapshot",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2224,
+        1340
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "9TnEU4uXAH0hvr1f",
+          "cachedResultName": "viral_post_metrics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "post_key": "={{ $json.post_key }}",
+            "platform": "={{ $json.platform }}",
+            "platform_video_id": "={{ $json.platform_video_id }}",
+            "source_key": "={{ $json.source_key }}",
+            "captured_at": "={{ $json.captured_at }}",
+            "age_h": "={{ $json.age_h }}",
+            "views": "={{ $json.views }}",
+            "reach": "={{ $json.reach }}",
+            "likes": "={{ $json.likes }}",
+            "comments": "={{ $json.comments }}",
+            "shares": "={{ $json.shares }}",
+            "run_id": "={{ $json.run_id }}",
+            "avg_watch_ms": "={{ $json.avg_watch_ms }}",
+            "total_watch_ms": "={{ $json.total_watch_ms }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "63aad8c8-43a3-41f3-ad6d-5f858fd7e856"
+    },
+    {
+      "name": "Update FB Post",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2224,
+        1500
+      ],
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "fb_views": "={{ $json.views }}",
+            "fb_likes": "={{ $json.likes }}",
+            "fb_metrics_at": "={{ $json.captured_at }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "4cf32e01-3f8f-48eb-8ed6-6e6269c45a77"
+    },
+    {
+      "name": "FB Earnings OK",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        1328,
+        1620
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ ($json.data?.[0]?.values ?? []).length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c14648c2-c81c-450c-ae79-5983b311e34e"
+    },
+    {
+      "name": "Save FB Earnings",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1552,
+        1620
+      ],
+      "notes": "Latest day available (Facebook reports earnings 1-2 days late).",
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "vqjHMIflVZuF6DRf",
+          "cachedResultName": "viral_account_metrics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "captured_at": "={{ $now.toISO() }}",
+            "platform": "facebook",
+            "earnings_usd": "={{ (($json.data?.[0]?.values ?? []).slice(-1)[0]?.value?.microAmount ?? 0) / 1e6 }}",
+            "run_id": "={{ $('Init Analytics').first().json.run_id }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "959e31f0-658a-490a-9de7-84619dda2396"
     }
   ],
   "connections": {
@@ -855,6 +1356,11 @@
           },
           {
             "node": "YT Channel",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FB Page",
             "type": "main",
             "index": 0
           }
@@ -1028,6 +1534,136 @@
           }
         ]
       ]
+    },
+    "FB Page": {
+      "main": [
+        [
+          {
+            "node": "FB Followers OK",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FB Earnings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FB Reels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Followers OK": {
+      "main": [
+        [
+          {
+            "node": "Save FB Followers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Reels": {
+      "main": [
+        [
+          {
+            "node": "FB Match Reels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Match Reels": {
+      "main": [
+        [
+          {
+            "node": "New FB Links",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FB Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New FB Links": {
+      "main": [
+        [
+          {
+            "node": "Save FB Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Insights": {
+      "main": [
+        [
+          {
+            "node": "Map FB Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map FB Metrics": {
+      "main": [
+        [
+          {
+            "node": "FB Metrics OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Metrics OK": {
+      "main": [
+        [
+          {
+            "node": "Save FB Snapshot",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update FB Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Earnings": {
+      "main": [
+        [
+          {
+            "node": "FB Earnings OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FB Earnings OK": {
+      "main": [
+        [
+          {
+            "node": "Save FB Earnings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -1041,7 +1677,7 @@
     "executionTimeout": 300,
     "binaryMode": "separate"
   },
-  "description": "US VIRAL Analytics: every 6h snapshots Instagram insights and YouTube Shorts statistics of Reels published in the last 7 days (viral_post_metrics), Instagram followers and YouTube subscribers (viral_account_metrics); links Shorts uploaded by hand; updates last_* / yt_* in viral_posts.",
+  "description": "US VIRAL Analytics: every 6h snapshots of the Reels of the last 7 days on Instagram, YouTube and Facebook (viral_post_metrics, one row per platform), followers / subscribers and Facebook earnings (viral_account_metrics); links Shorts and Page Reels shared by hand; updates last_* / yt_* / fb_* in viral_posts.",
   "nodeGroups": [
     {
       "id": "831f66f2-dbf5-49f5-aa62-57251cdf55bb",
@@ -1128,6 +1764,55 @@
         "Save YT Subscribers"
       ],
       "description": "Channel subscribers snapshot (viral_account_metrics, platform=youtube)"
+    },
+    {
+      "id": "a9888e02-dd87-47a7-8224-802fc43a3a92",
+      "name": "Facebook Page",
+      "nodeNames": [
+        "FB Followers OK",
+        "Save FB Followers"
+      ],
+      "description": "Page followers snapshot (viral_account_metrics, platform=facebook)"
+    },
+    {
+      "id": "8572dd2a-5de7-4f73-b3b1-16b8cc681f88",
+      "name": "Facebook Reels",
+      "nodeNames": [
+        "FB Reels",
+        "FB Match Reels"
+      ],
+      "description": "Page Reels; links the ones shared by hand"
+    },
+    {
+      "id": "39682469-52ea-4392-b9d5-ae49496821b7",
+      "name": "Facebook Stats",
+      "nodeNames": [
+        "FB Insights",
+        "Map FB Metrics",
+        "FB Metrics OK",
+        "Save FB Snapshot",
+        "Update FB Post"
+      ],
+      "description": "Views / likes / comments / shares of the Page Reels"
+    },
+    {
+      "id": "5284bd75-31d5-4104-a8c1-c01df6b9fcab",
+      "name": "Save FB Links",
+      "nodeNames": [
+        "New FB Links",
+        "Save FB Link"
+      ],
+      "description": "Write the new fb_video_id links in viral_posts"
+    },
+    {
+      "id": "ac51cd96-e7fb-4ad8-920d-314129e466a3",
+      "name": "Facebook Earnings",
+      "nodeNames": [
+        "FB Earnings",
+        "FB Earnings OK",
+        "Save FB Earnings"
+      ],
+      "description": "Content monetization earnings (USD, latest day available)"
     }
   ],
   "meta": {
