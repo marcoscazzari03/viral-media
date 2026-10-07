@@ -53,6 +53,25 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
   Analytics API, permesso OAuth di sola lettura ricavi) e Facebook (metrica guadagni delle Page Insights, da
   verificare sull'API). Oggi $0: nessun canale è ancora monetizzato. Niente stime views × RPM.
 
+## Fatto il 7 ottobre (sera)
+- [x] Facebook automatico (workflow 07) + statistiche della Pagina, follower e guadagni reali nel 04.
+- [x] Report delle 20:20 a sezioni: pubblicazioni, views 24h per social, top contenuto (tutti i social),
+  💰 guadagni reali (Facebook via API; Instagram/YouTube/TikTok senza dato), perché sotto target, pipeline.
+- [x] 5 temi visivi (giallo, rosso, blu, verde, viola) con rotazione nella Factory; copertine con badge e logo.
+- [x] Abbinamento automatico degli Short e dei Reel della Pagina caricati/condivisi a mano.
+- [x] Esperimento "nascondere i sottotitoli dello streamer" (fascia fissa e riconoscimento automatico): scartato,
+  risultato peggiore dei sottotitoli originali. Codice spento sul server (`hide_band`, `hide_subs`), non usato.
+
+## Prossimi passi
+- [ ] Sicurezza: rigenerare i token Facebook (incollati in chat), cambiare `API_TOKEN` del server e il segreto
+  Sandbox TikTok, poi repo privato (prima deploy key di sola lettura sul server).
+- [ ] TikTok: all'approvazione dell'app chiavi di produzione + pubblicazione automatica da n8n.
+- [ ] YouTube: all'approvazione dell'audit `yt_enabled` = 1, `yt_privacy` = public, attivare il 06.
+- [ ] Tra qualche giorno, con i dati: confronto voce sì/no, temi e streamer; priorità delle sorgenti che si
+  aggiustano da sole (`learned_weight`); verificare i 12 nuovi streamer; valutare 3 Reel al giorno.
+- [ ] Avviso Telegram ~10 giorni prima della scadenza del token Instagram (circa 4 dicembre).
+- [ ] Ripulire i Reel di prova ("forced") e le righe rimaste a metà nelle tabelle.
+
 ## Blocco Meta (6 ottobre)
 - [x] Pubblicazione Instagram via API bloccata ("API access blocked", 17:05): risolta completando la verifica
   dell'account Facebook. Primo Reel pubblicato via API il 7 ottobre all'01:06 (Jynxzi, layout webcam).
