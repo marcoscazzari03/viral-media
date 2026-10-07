@@ -112,7 +112,13 @@
         }
       },
       "notes": "Creates the Reel on the Page and returns its video_id.",
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7yCG6wcXqjOxd9rb",
+          "name": "US VIRAL - Facebook Page"
+        }
+      }
     },
     {
       "id": "5050c717-ddad-448d-9f7a-2d13abc2bbcd",
@@ -143,7 +149,13 @@
         }
       },
       "notes": "Facebook downloads the Reel from the worker URL (file_url header).",
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7yCG6wcXqjOxd9rb",
+          "name": "US VIRAL - Facebook Page"
+        }
+      }
     },
     {
       "id": "a1d535d8-3ae8-48e9-994d-3beaa21adb5d",
@@ -187,7 +199,13 @@
         }
       },
       "notes": "upload_phase=finish + video_state=PUBLISHED: Facebook publishes the Reel when processing ends.",
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7yCG6wcXqjOxd9rb",
+          "name": "US VIRAL - Facebook Page"
+        }
+      }
     },
     {
       "id": "013c723f-3a54-43a4-9576-408fc7e32d2e",
@@ -322,7 +340,7 @@
           "matchingColumns": [],
           "schema": [],
           "value": {
-            "fb_error": "={{ String($('FB Publish Reel').item.json.error?.message ?? $('FB Upload From URL').item.json.error?.message ?? $('FB Start Upload').item.json.error?.message ?? JSON.stringify($('FB Publish Reel').item.json)).slice(0, 500) }}"
+            "fb_error": "={{ String($('FB Start Upload').item.json.error?.message ?? $('FB Upload From URL').item.json.error?.message ?? $('FB Publish Reel').item.json.error?.message ?? JSON.stringify($('FB Publish Reel').item.json)).slice(0, 500) }}"
           }
         }
       },
@@ -341,7 +359,7 @@
         "resource": "message",
         "operation": "sendMessage",
         "chatId": "={{ $('Pick for Facebook').item.json.chat_id }}",
-        "text": "={{ '❌ <b>Reel su Facebook non pubblicato</b>\\n' + ($('Pick for Facebook').item.json.creator_name + ' — ' + $('Pick for Facebook').item.json.title + '\\n' + String($('FB Publish Reel').item.json.error?.message ?? $('FB Upload From URL').item.json.error?.message ?? $('FB Start Upload').item.json.error?.message ?? JSON.stringify($('FB Publish Reel').item.json)).slice(0, 500)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "text": "={{ '❌ <b>Reel su Facebook non pubblicato</b>\\n' + ($('Pick for Facebook').item.json.creator_name + ' — ' + $('Pick for Facebook').item.json.title + '\\n' + String($('FB Start Upload').item.json.error?.message ?? $('FB Upload From URL').item.json.error?.message ?? $('FB Publish Reel').item.json.error?.message ?? JSON.stringify($('FB Publish Reel').item.json)).slice(0, 500)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
         "additionalFields": {
           "appendAttribution": false,
           "parse_mode": "HTML",
