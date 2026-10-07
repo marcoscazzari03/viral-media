@@ -34,8 +34,9 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [ ] Rigenerare `API_TOKEN` del server e secret TikTok Sandbox (sono passati in chat).
 
 ## Da fare (7 ottobre)
-- [ ] Mattina: svuotare `publish_force_post_key`; rimettere `factory_max_reels_per_day` = 3 e `publish_max_per_day` = 2
-  (`publish_enabled` resta 1).
+- [x] Mattina: svuotato `publish_force_post_key`; rimessi `factory_max_reels_per_day` = 3 e `publish_max_per_day` = 2.
+- [x] Titolo spostato sotto la fascia alta di Instagram; layout webcam solo con webcam vera (falso positivo su Lacy IRL,
+  Reel messo STALE). `has_burned_captions` = true anche per Stable Ronaldo.
 - [ ] Facebook: la condivisione automatica Instagram → Pagina NON vale per i post pubblicati via API (Pagina ancora a
   0 post). Soluzione: workflow `07 - US VIRAL | Facebook Publisher` che pubblica lo stesso Reel sulla Pagina con
   l'API Reels delle Pagine (`/{page-id}/video_reels`), un'ora dopo Instagram, con avviso Telegram.
