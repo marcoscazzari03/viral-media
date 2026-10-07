@@ -43,7 +43,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Init Analytics — run context + typed config (viral_config). Missing keys fall back to DEFAULTS.\n\nconst DEFAULTS = {\n  ig_user_id: '',\n  ig_api_version: 'v23.0',\n  analytics_track_days: 7,\n  ig_reel_metrics: 'views,reach,likes,comments,shares,saved,total_interactions,ig_reels_avg_watch_time,ig_reels_video_view_total_time',\n};\n\nconst config = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json;\n  const key = String(r.key ?? '').trim();\n  if (!(key in DEFAULTS)) continue;\n  const hasNum = r.value_number !== null && r.value_number !== undefined && Number.isFinite(Number(r.value_number));\n  const hasStr = typeof r.value_string === 'string' && r.value_string.trim() !== '';\n  if (typeof DEFAULTS[key] === 'number') { if (hasNum) config[key] = Number(r.value_number); }\n  else if (hasStr) config[key] = r.value_string.trim();\n}\nconfig.ig_reel_metrics = config.ig_reel_metrics.split(',').map(s => s.trim()).filter(Boolean).join(',');\n\nreturn [{\n  json: {\n    run_id: `ana-${$now.toFormat('yyyyMMdd-HHmm')}-${$execution.id}`,\n    started_at: new Date().toISOString(),\n    graph: `https://graph.instagram.com/${config.ig_api_version}`,\n    config,\n  },\n}];\n"
+        "jsCode": "// Init Analytics — run context + typed config (viral_config). Missing keys fall back to DEFAULTS.\n\nconst DEFAULTS = {\n  ig_user_id: '',\n  ig_api_version: 'v23.0',\n  analytics_track_days: 7,\n  yt_channel_handle: '@viralstreamersdaily',\n  ig_reel_metrics: 'views,reach,likes,comments,shares,saved,total_interactions,ig_reels_avg_watch_time,ig_reels_video_view_total_time',\n};\n\nconst config = { ...DEFAULTS };\nfor (const item of $input.all()) {\n  const r = item.json;\n  const key = String(r.key ?? '').trim();\n  if (!(key in DEFAULTS)) continue;\n  const hasNum = r.value_number !== null && r.value_number !== undefined && Number.isFinite(Number(r.value_number));\n  const hasStr = typeof r.value_string === 'string' && r.value_string.trim() !== '';\n  if (typeof DEFAULTS[key] === 'number') { if (hasNum) config[key] = Number(r.value_number); }\n  else if (hasStr) config[key] = r.value_string.trim();\n}\nconfig.ig_reel_metrics = config.ig_reel_metrics.split(',').map(s => s.trim()).filter(Boolean).join(',');\n\nreturn [{\n  json: {\n    run_id: `ana-${$now.toFormat('yyyyMMdd-HHmm')}-${$execution.id}`,\n    started_at: new Date().toISOString(),\n    graph: `https://graph.instagram.com/${config.ig_api_version}`,\n    config,\n  },\n}];\n"
       },
       "id": "42fe4581-95dc-4c78-85e2-c07e04a146da",
       "name": "Init Analytics",
@@ -454,7 +454,7 @@
       "notes": "One YouTube call for all Shorts. 0 items = no Short to measure.",
       "id": "d6cb20a0-2154-48cc-a71e-16d29f3ec758",
       "position": [
-        880,
+        1552,
         800
       ]
     },
@@ -501,7 +501,7 @@
       },
       "id": "5368d035-b798-4d37-a875-db084945277d",
       "position": [
-        1104,
+        1776,
         800
       ]
     },
@@ -516,7 +516,7 @@
       "typeVersion": 2,
       "id": "c36c55d0-6ce8-42fd-8b98-0588fb380f29",
       "position": [
-        1328,
+        2000,
         800
       ]
     },
@@ -552,7 +552,7 @@
       "typeVersion": 1.1,
       "id": "dc8f7b63-0af8-4c2e-a97a-c3e93ab7b965",
       "position": [
-        1552,
+        2224,
         720
       ]
     },
@@ -592,9 +592,183 @@
       "typeVersion": 1.1,
       "id": "0c95f8a0-be1c-4716-8548-8063989c6e84",
       "position": [
-        1552,
+        2224,
         880
       ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/channels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "contentDetails"
+            },
+            {
+              "name": "forHandle",
+              "value": "={{ $('Init Analytics').first().json.config.yt_channel_handle }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "YT Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        800
+      ],
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "notes": "Our channel (yt_channel_handle) -> uploads playlist. 1 quota unit.",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "XLgg21h8Ot8uyTe7",
+          "name": "US VIRAL - YouTube API Key"
+        }
+      },
+      "id": "0494ce7e-0472-467d-92f7-53b7db1a6d32"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/playlistItems",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet,contentDetails"
+            },
+            {
+              "name": "playlistId",
+              "value": "={{ $json.items?.[0]?.contentDetails?.relatedPlaylists?.uploads }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "25"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "YT Uploads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1104,
+        800
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Latest 25 uploads of our channel (manual and API). 1 quota unit.",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "XLgg21h8Ot8uyTe7",
+          "name": "US VIRAL - YouTube API Key"
+        }
+      },
+      "id": "513b887a-661e-40a1-b158-6b228eb4cc0e"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// YT Match Uploads — links the Shorts uploaded by hand to their Reel, so nobody has to fill yt_video_id.\n// A Reel without yt_video_id gets the latest upload of our channel that (1) is not linked to another Reel,\n// (2) went up between 12h before and 72h after the Instagram post, and (3) mentions the meme line, the first\n// line of the caption (often used as title), the hook or the streamer. Best text match wins, then the closest in time.\n// Output: every post of Get Published (with the linked yt_video_id), link_new = true for the new links.\n\nconst posts = $('Get Published').all().map(i => ({ ...(i.json ?? {}) }));\nconst uploads = ($input.first().json.items ?? []).map(it => ({\n  id: it.snippet?.resourceId?.videoId ?? it.contentDetails?.videoId,\n  at: Date.parse(it.contentDetails?.videoPublishedAt ?? it.snippet?.publishedAt ?? ''),\n  text: `${it.snippet?.title ?? ''} ${it.snippet?.description ?? ''}`,\n})).filter(u => u.id && Number.isFinite(u.at));\n\nconst isYtId = v => /^[A-Za-z0-9_-]{11}$/.test(String(v ?? '').trim());\nconst norm = s => String(s ?? '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim();\nconst used = new Set(posts.filter(p => isYtId(p.yt_video_id)).map(p => String(p.yt_video_id).trim()));\n\nconst score = (p, u) => {\n  const t = ` ${norm(u.text)} `;\n  let s = 0;\n  const fields = { meme_caption: 3, caption_head: 3, hook: 2, title: 1 };\n  const vals = { ...p, caption_head: String(p.caption ?? '').split('\\n')[0] };\n  for (const [field, w] of Object.entries(fields)) {\n    const v = norm(vals[field]);\n    if (v.length >= 6 && t.includes(` ${v} `)) s = Math.max(s, w);\n  }\n  const creator = norm(p.creator_name);\n  if (creator && t.includes(` ${creator} `)) s += 1;\n  return s;\n};\n\nfor (const p of posts.sort((a, b) => Date.parse(a.published_at) - Date.parse(b.published_at))) {\n  if (isYtId(p.yt_video_id)) continue;\n  const pub = Date.parse(p.published_at);\n  if (!Number.isFinite(pub)) continue;\n  const best = uploads\n    .filter(u => !used.has(u.id) && u.at >= pub - 12 * 3.6e6 && u.at <= pub + 72 * 3.6e6)\n    .map(u => ({ u, s: score(p, u), d: Math.abs(u.at - pub) }))\n    .filter(x => x.s > 0)\n    .sort((a, b) => b.s - a.s || a.d - b.d)[0];\n  if (!best) continue;\n  used.add(best.u.id);\n  p.yt_video_id = best.u.id;\n  p.yt_published_at = new Date(best.u.at).toISOString();\n  p.link_new = true;\n}\n\nreturn posts.map(p => ({ json: p }));\n"
+      },
+      "name": "YT Match Uploads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        800
+      ],
+      "notes": "Fills yt_video_id of the Shorts uploaded by hand.",
+      "id": "c311794e-ad8c-49f3-8ac2-f84601e4dd47"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.link_new === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "New YT Links",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        1552,
+        1000
+      ],
+      "id": "7017fdbc-6d90-49c3-ba49-6021ef9e3f08"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "yt_video_id": "={{ $json.yt_video_id }}",
+            "yt_published_at": "={{ $json.yt_published_at }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save YT Link",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1776,
+        1000
+      ],
+      "id": "57130756-9586-4386-9c1f-f09895fe5675"
     }
   ],
   "connections": {
@@ -656,7 +830,7 @@
             "index": 0
           },
           {
-            "node": "YT Build Request",
+            "node": "YT Channel",
             "type": "main",
             "index": 0
           }
@@ -765,6 +939,55 @@
           }
         ]
       ]
+    },
+    "YT Channel": {
+      "main": [
+        [
+          {
+            "node": "YT Uploads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YT Uploads": {
+      "main": [
+        [
+          {
+            "node": "YT Match Uploads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YT Match Uploads": {
+      "main": [
+        [
+          {
+            "node": "YT Build Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "New YT Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New YT Links": {
+      "main": [
+        [
+          {
+            "node": "Save YT Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -838,6 +1061,25 @@
         "Update YT Post"
       ],
       "description": "Public views / likes / comments of the Shorts (yt_video_id)"
+    },
+    {
+      "id": "03977d6d-585a-4d2d-9a4f-ecd7f9b03c0b",
+      "name": "YouTube Links",
+      "nodeNames": [
+        "YT Channel",
+        "YT Uploads",
+        "YT Match Uploads"
+      ],
+      "description": "Link Shorts uploaded by hand to their Reel (yt_video_id)"
+    },
+    {
+      "id": "92df7e74-ff59-4790-b3a6-96aafae14a62",
+      "name": "Save YT Links",
+      "nodeNames": [
+        "New YT Links",
+        "Save YT Link"
+      ],
+      "description": "Write the new yt_video_id links in viral_posts"
     }
   ],
   "meta": {
