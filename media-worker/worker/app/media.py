@@ -670,6 +670,7 @@ def detect_facecam(job_dir: Path, src: Path, sw: int, sh: int, duration: float) 
     edge_y = np.abs(cv2.Sobel(mean, cv2.CV_32F, 0, 1, ksize=3)) > 60
     edge_x = np.abs(cv2.Sobel(mean, cv2.CV_32F, 1, 0, ksize=3)) > 60
     fb, ft, fr_, fl = int(fy + fh * 0.85), int(fy - fh * 0.15), int(fx + fw * 1.15), int(fx - fw * 0.15)
+    bx0, by0, bx1, by1 = x0, y0, x1, y1
     for _ in range(2):  # sides first (rows measured on the trimmed width), then again with the trimmed height
         line_col = lambda c: edge_x[y0:y1, c].mean() > 0.5  # noqa: E731 - a border spans the whole box
         x1 = next((c for c in range(max(fr_, x0), x1) if line_col(c)), x1)
@@ -677,6 +678,14 @@ def detect_facecam(job_dir: Path, src: Path, sw: int, sh: int, duration: float) 
         line_row = lambda r: edge_y[r, x0:x1].mean() > 0.5  # noqa: E731
         y1 = next((r for r in range(max(fb, y0), y1) if line_row(r)), y1)
         y0 = next((r for r in range(min(ft, y1 - 1), y0, -1) if line_row(r)), y0)
+    # a webcam overlay is a box: at least 2 of its sides are either a straight border line or the frame edge.
+    # Faces of people in the scene itself (IRL streams, crowds) have neither: normal layout for them.
+    sides = sum((x0 > bx0 or x0 == 0, x1 < bx1 or x1 >= gw - 1, y0 > by0 or y0 == 0, y1 < by1 or y1 >= gh - 1))
+    spread = max(np.std([f[0] + f[2] / 2 for f in best]), np.std([f[1] + f[3] / 2 for f in best])) / gw
+    if os.environ.get("FACECAM_DEBUG"):
+        print("facecam", {"sides": sides, "spread": round(float(spread), 3), "face": (fx, fy, fw, fh), "n": len(best)})
+    if sides < 2 or spread > 0.045:  # a webcam stays put (Jynxzi leaning in: 0.026), people in a scene move
+        return None
     k = sw / gw
     return {"x": int(x0 * k), "y": int(y0 * k), "w": even((x1 - x0) * k), "h": even((y1 - y0) * k),
             "face_cx": (fx + fw / 2) * k}
