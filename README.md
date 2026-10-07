@@ -20,7 +20,7 @@ Exports (backups, importable in n8n) are in [`n8n/workflows/`](n8n/workflows/). 
 | `03 - US VIRAL \| Publisher` | :05 at 11, 12, 15, 16, 19, 20 | Publishes the best READY Reel on Instagram in the slots `publish_slots_et` (11, 15, 19), with daily cap and min gap. The hour after each slot resumes a video Instagram is still processing. Telegram message on publish / failure. |
 | `04 - US VIRAL \| Analytics` | every 6 h at :25 | Instagram insights and YouTube Shorts statistics (views, likes, comments) of the Reels of the last 7 days (`viral_post_metrics`, one row per platform) , Instagram followers and YouTube subscribers (`viral_account_metrics`, one row per platform). Links Shorts uploaded by hand to their Reel (`yt_video_id`) from the channel's latest uploads. |
 | `05 - US VIRAL \| Daily Report` | 20:20 | Telegram summary of the day: Reels published, views of the last 24h per platform (vs the day before), follower / subscriber change per platform, top Reel and, when fewer Reels than planned, the likely reasons. |
-| `07 - US VIRAL \| Facebook Publisher` | :35 at 12, 16, 20 | Publishes the Reels already on Instagram as Reels on the Facebook Page (Meta does not share API-published posts to the Page). **Inactive** until the Page token credential is set. |
+| `07 - US VIRAL \| Facebook Publisher` | :35 at 12, 16, 20 | Publishes the Reels already on Instagram (last 48 h) as Reels on the Facebook Page (Meta does not share API-published posts to the Page). Active since 7 October (`fb_enabled` = 1). |
 | `06 - US VIRAL \| YouTube Publisher` | :20 at 12, 16, 20 | Uploads the Reels already published on Instagram as YouTube Shorts. **Inactive** until the YouTube API audit is approved. |
 
 If `publish_slots_et` changes, update the schedule of 03 and 06 too.
@@ -41,7 +41,7 @@ n8n plan limit of 2,500 a month shared with all other workflows of the instance.
 
 ### Credentials (names only, values live in n8n)
 
-`US VIRAL - Instagram`, `US VIRAL - Telegram`, `US VIRAL - YouTube` (custom Google OAuth2 client, uploads),
+`US VIRAL - Instagram`, `US VIRAL - Facebook Page` (Header Auth, Page token), `US VIRAL - Telegram`, `US VIRAL - YouTube` (custom Google OAuth2 client, uploads),
 `US VIRAL - YouTube API Key` (discovery), `US VIRAL - Twitch API`, `US VIRAL - Anthropic`, `US VIRAL - Media Worker`.
 Exports keep credential names and ids only; the Telegram chat id is replaced by `YOUR_TELEGRAM_CHAT_ID`.
 
@@ -70,7 +70,7 @@ platforms, TikTok login and publishing page (`/panel`), legal pages (`/legal/`).
 | Platform | How | Status |
 |---|---|---|
 | Instagram | 03 Publisher (Instagram Graph API) | automatic, 2 Reels a day |
-| Facebook Page | 07 Facebook Publisher (Page Reels API) | waiting for the Page token, manual "Share to Facebook" meanwhile |
+| Facebook Page | 07 Facebook Publisher (Page Reels API) | automatic, 30 min after each Instagram slot |
 | YouTube Shorts | 06 YouTube Publisher (YouTube Data API v3) | waiting for API audit, manual upload meanwhile |
 | TikTok | worker `/panel` + `/tiktok/post` (Content Posting API) | waiting for app review, drafts / manual upload meanwhile |
 

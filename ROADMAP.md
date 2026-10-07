@@ -37,13 +37,14 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [x] Mattina: svuotato `publish_force_post_key`; rimessi `factory_max_reels_per_day` = 3 e `publish_max_per_day` = 2.
 - [x] Titolo spostato sotto la fascia alta di Instagram; layout webcam solo con webcam vera (falso positivo su Lacy IRL,
   Reel messo STALE). `has_burned_captions` = true anche per Stable Ronaldo.
-- [ ] Facebook: la condivisione automatica Instagram → Pagina NON vale per i post pubblicati via API (Pagina ancora a
+- [x] Facebook (7 ottobre sera): workflow 07 attivo, primo Reel pubblicato via API (Jynxzi). Token della Pagina senza scadenza nella credenziale "US VIRAL - Facebook Page". Da fare: rigenerare i token (incollati in chat) e aggiungere le statistiche della Pagina al 04.
+  Prima: la condivisione automatica Instagram → Pagina NON vale per i post pubblicati via API (Pagina ancora a
   0 post). Soluzione: workflow `07 - US VIRAL | Facebook Publisher` che pubblica lo stesso Reel sulla Pagina con
   l'API Reels delle Pagine (`/{page-id}/video_reels`), un'ora dopo Instagram, con avviso Telegram.
   Da fare prima, dall'utente: caso d'uso "Gestisci tutto sulla tua Pagina" nell'app Meta, token della Pagina
   (pages_show_list, pages_read_engagement, pages_manage_posts), credenziale n8n "US VIRAL - Facebook Page".
   Intanto: Reel di Jynxzi pubblicabile a mano da Meta Business Suite.
-- [ ] Il README dice ancora "Facebook via Meta auto-share": aggiornare quando c'è il workflow 07.
+- [x] README aggiornato con il workflow 07.
 - [x] Statistiche multi-social: 04 legge anche views / like / commenti degli Short, iscritti YouTube e collega da solo
   gli Short caricati a mano (niente tabelle a mano); il report delle 20:20 mostra views 24h per social, variazione
   follower / iscritti e Reel top.
