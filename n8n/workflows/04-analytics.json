@@ -338,7 +338,9 @@
             "total_interactions": "={{ $json.total_interactions }}",
             "avg_watch_ms": "={{ $json.avg_watch_ms }}",
             "total_watch_ms": "={{ $json.total_watch_ms }}",
-            "run_id": "={{ $json.run_id }}"
+            "run_id": "={{ $json.run_id }}",
+            "platform": "instagram",
+            "platform_video_id": "={{ $json.ig_media_id }}"
           }
         },
         "options": {}
@@ -439,6 +441,160 @@
         1984,
         624
       ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// YT Build Request — the YouTube Shorts of the Reels published in the last analytics_track_days.\n// yt_video_id is set by 06 (YouTube Publisher) or by hand after a manual upload; anything that is not an\n// 11-char YouTube id (e.g. empty) is skipped. One videos.list call takes up to 50 ids.\n\nconst posts = $input.all()\n  .map(i => i.json ?? {})\n  .filter(p => /^[A-Za-z0-9_-]{11}$/.test(String(p.yt_video_id ?? '').trim()))\n  .slice(0, 50)\n  .map(p => ({ post_key: p.post_key, yt_video_id: String(p.yt_video_id).trim(), source_key: p.source_key,\n    published_at: p.yt_published_at || p.published_at }));\nif (!posts.length) return [];\nreturn [{ json: { ids: posts.map(p => p.yt_video_id).join(','), posts } }];\n"
+      },
+      "name": "YT Build Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notes": "One YouTube call for all Shorts. 0 items = no Short to measure.",
+      "id": "d6cb20a0-2154-48cc-a71e-16d29f3ec758",
+      "position": [
+        880,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/youtube/v3/videos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "statistics"
+            },
+            {
+              "name": "id",
+              "value": "={{ $json.ids }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "50"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "YT Statistics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "notes": "videos.list part=statistics (1 quota unit). Public counts: views, likes, comments.",
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "XLgg21h8Ot8uyTe7",
+          "name": "US VIRAL - YouTube API Key"
+        }
+      },
+      "id": "5368d035-b798-4d37-a875-db084945277d",
+      "position": [
+        1104,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Map YT Metrics — one snapshot row per Short found by YouTube (deleted / private ones are simply missing).\n\nconst run = $('Init Analytics').first().json;\nconst posts = $('YT Build Request').first().json.posts;\nconst stats = new Map(($input.first().json.items ?? []).map(v => [v.id, v.statistics ?? {}]));\nconst num = v => (v === undefined || v === null || !Number.isFinite(Number(v)) ? null : Number(v));\nconst nowIso = new Date().toISOString();\n\nreturn posts.filter(p => stats.has(p.yt_video_id)).map(p => {\n  const s = stats.get(p.yt_video_id);\n  const ageH = (Date.now() - Date.parse(p.published_at)) / 3.6e6;\n  return {\n    json: {\n      post_key: p.post_key,\n      platform: 'youtube',\n      platform_video_id: p.yt_video_id,\n      source_key: p.source_key,\n      captured_at: nowIso,\n      age_h: Number.isFinite(ageH) ? Math.round(ageH * 10) / 10 : null,\n      views: num(s.viewCount),\n      likes: num(s.likeCount),\n      comments: num(s.commentCount),\n      run_id: run.run_id,\n    },\n  };\n});\n"
+      },
+      "name": "Map YT Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "id": "c36c55d0-6ce8-42fd-8b98-0588fb380f29",
+      "position": [
+        1328,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "9TnEU4uXAH0hvr1f",
+          "cachedResultName": "viral_post_metrics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "post_key": "={{ $json.post_key }}",
+            "platform": "={{ $json.platform }}",
+            "platform_video_id": "={{ $json.platform_video_id }}",
+            "source_key": "={{ $json.source_key }}",
+            "captured_at": "={{ $json.captured_at }}",
+            "age_h": "={{ $json.age_h }}",
+            "views": "={{ $json.views }}",
+            "likes": "={{ $json.likes }}",
+            "comments": "={{ $json.comments }}",
+            "run_id": "={{ $json.run_id }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Save YT Snapshot",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "id": "dc8f7b63-0af8-4c2e-a97a-c3e93ab7b965",
+      "position": [
+        1552,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "post_key",
+              "keyValue": "={{ $json.post_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "yt_views": "={{ $json.views }}",
+            "yt_likes": "={{ $json.likes }}",
+            "yt_comments": "={{ $json.comments }}",
+            "yt_metrics_at": "={{ $json.captured_at }}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Update YT Post",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "id": "0c95f8a0-be1c-4716-8548-8063989c6e84",
+      "position": [
+        1552,
+        880
+      ]
     }
   ],
   "connections": {
@@ -496,6 +652,11 @@
         [
           {
             "node": "Get Insights",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "YT Build Request",
             "type": "main",
             "index": 0
           }
@@ -566,6 +727,44 @@
           }
         ]
       ]
+    },
+    "YT Build Request": {
+      "main": [
+        [
+          {
+            "node": "YT Statistics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YT Statistics": {
+      "main": [
+        [
+          {
+            "node": "Map YT Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map YT Metrics": {
+      "main": [
+        [
+          {
+            "node": "Save YT Snapshot",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update YT Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -579,7 +778,7 @@
     "executionTimeout": 300,
     "binaryMode": "separate"
   },
-  "description": "US VIRAL Analytics: every 6h snapshots Instagram insights of Reels published in the last 7 days (viral_post_metrics) and followers (viral_account_metrics); updates last_* in viral_posts.",
+  "description": "US VIRAL Analytics: every 6h snapshots Instagram insights and YouTube Shorts statistics of Reels published in the last 7 days (viral_post_metrics) and followers (viral_account_metrics); updates last_* / yt_* in viral_posts.",
   "nodeGroups": [
     {
       "id": "831f66f2-dbf5-49f5-aa62-57251cdf55bb",
@@ -601,16 +800,6 @@
       "description": "Followers + media count snapshot"
     },
     {
-      "id": "402f3b50-6d4c-422d-8995-e5f841cb3469",
-      "name": "Reel Insights",
-      "nodeNames": [
-        "Get Published",
-        "Get Insights",
-        "Map Metrics"
-      ],
-      "description": "Lifetime insights of every Reel published in the last N days"
-    },
-    {
       "id": "a52d7692-1693-476a-95a6-8c4e02dc0a69",
       "name": "Run Log",
       "nodeNames": [
@@ -618,6 +807,37 @@
         "Write Run Log"
       ],
       "description": "One row in viral_runs per run"
+    },
+    {
+      "id": "31f909b4-e68e-4681-ab3d-c2ab83c77f08",
+      "name": "Instagram Insights",
+      "nodeNames": [
+        "Get Insights",
+        "Map Metrics"
+      ],
+      "description": "Lifetime insights of every Reel published in the last N days"
+    },
+    {
+      "id": "ba4975d6-0f68-4103-b148-ae9348cb9462",
+      "name": "Save Instagram",
+      "nodeNames": [
+        "Metrics OK",
+        "Save Snapshot",
+        "Update Post"
+      ],
+      "description": "Snapshot in viral_post_metrics (platform=instagram) + last_* in viral_posts"
+    },
+    {
+      "id": "f02248a2-ad12-477b-822a-535c5b13bc0b",
+      "name": "YouTube Stats",
+      "nodeNames": [
+        "YT Build Request",
+        "YT Statistics",
+        "Map YT Metrics",
+        "Save YT Snapshot",
+        "Update YT Post"
+      ],
+      "description": "Public views / likes / comments of the Shorts (yt_video_id)"
     }
   ],
   "meta": {
