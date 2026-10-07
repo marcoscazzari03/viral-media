@@ -369,6 +369,119 @@ TEXT_TOP, CLIP_TOP = 220, 580
 HIGHLIGHT = "&H0000E6FF&"  # ASS colours are BGR: yellow #FFE600
 ACCENT = "&H00FF5CB4&"  # brand purple #B45CFF, for the key word of the meme line (top_accent, "clean" style)
 POP_YELLOW = "&H0021D2FF&"  # #FFD221: key word, underline and sparks of the "pop" meme line
+LOGO = Path(__file__).parent / "assets" / "logo.png"
+
+
+def ass_rgb(hex_: str, alpha: int = 0) -> str:
+    """#RRGGBB -> ASS &HAABBGGRR& (alpha 0 = opaque, 255 = invisible)."""
+    h = hex_.lstrip("#")
+    return f"&H{alpha:02X}{h[4:6]}{h[2:4]}{h[0:2]}&".upper()
+
+
+# Visual themes: same font, texts, layout and logo on every Reel; only the accent colour and the decorations
+# change (key word, underline, side marks, caption highlight, split line; on the cover also background shapes,
+# badge and frame). The Factory rotates them so the profile grid does not look like copies of one cover.
+THEMES = {
+    "yellow": {"hex": "#FFD221", "deco": "soft"},      # soft blobs, swoosh, sparks, pill badge
+    "red": {"hex": "#FF4545", "deco": "diagonal"},     # diagonal stripes, slanted bar, chevrons, cut corners
+    "blue": {"hex": "#3DA9FF", "deco": "blocks"},      # geometric blocks, square bar, corner brackets
+    "green": {"hex": "#3DFF8B", "deco": "circles"},    # rings, dotted underline, dotted edges
+    "purple": {"hex": "#B45CFF", "deco": "meme"},      # starbursts, zigzag, sticker badge and frame
+}
+
+
+def theme_of(name: str | None) -> dict:
+    key = name if name in THEMES else "yellow"
+    return {"name": key, **THEMES[key], "c": ass_rgb(THEMES[key]["hex"])}
+
+
+def d_circle(cx: float, cy: float, r: float) -> str:
+    k = 0.5523 * r
+    return (f"m {cx - r:.0f} {cy:.0f} b {cx - r:.0f} {cy - k:.0f} {cx - k:.0f} {cy - r:.0f} {cx:.0f} {cy - r:.0f} "
+            f"b {cx + k:.0f} {cy - r:.0f} {cx + r:.0f} {cy - k:.0f} {cx + r:.0f} {cy:.0f} "
+            f"b {cx + r:.0f} {cy + k:.0f} {cx + k:.0f} {cy + r:.0f} {cx:.0f} {cy + r:.0f} "
+            f"b {cx - k:.0f} {cy + r:.0f} {cx - r:.0f} {cy + k:.0f} {cx - r:.0f} {cy:.0f}")
+
+
+def d_poly(points: list[tuple[float, float]]) -> str:
+    return "m " + " l ".join(f"{x:.0f} {y:.0f}" for x, y in points)
+
+
+def d_rrect(x0: float, y0: float, x1: float, y1: float, r: float) -> str:
+    k = 0.45 * r
+    return (f"m {x0 + r:.0f} {y0:.0f} l {x1 - r:.0f} {y0:.0f} b {x1 - k:.0f} {y0:.0f} {x1:.0f} {y0 + k:.0f} "
+            f"{x1:.0f} {y0 + r:.0f} l {x1:.0f} {y1 - r:.0f} b {x1:.0f} {y1 - k:.0f} {x1 - k:.0f} {y1:.0f} "
+            f"{x1 - r:.0f} {y1:.0f} l {x0 + r:.0f} {y1:.0f} b {x0 + k:.0f} {y1:.0f} {x0:.0f} {y1 - k:.0f} "
+            f"{x0:.0f} {y1 - r:.0f} l {x0:.0f} {y0 + r:.0f} b {x0:.0f} {y0 + k:.0f} {x0 + k:.0f} {y0:.0f} "
+            f"{x0 + r:.0f} {y0:.0f}")
+
+
+def d_star(cx: float, cy: float, r_out: float, r_in: float, n: int, rot: float = 0) -> str:
+    pts = []
+    for i in range(2 * n):
+        a = math.radians(rot + i * 180 / n)
+        r = r_out if i % 2 == 0 else r_in
+        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return d_poly(pts)
+
+
+def underline_shape(deco: str, sl: float, k: float) -> str:
+    """Drawing under the meme line, local coordinates: x from 0 to sl, y from about 0 to 20k."""
+    t = 10 * k
+    if deco == "diagonal":  # slanted bar + short slanted tick
+        s = 16 * k
+        return (d_poly([(s, 0), (sl - 30 * k, 0), (sl - 30 * k - s, 1.6 * t), (0, 1.6 * t)]) + " " +
+                d_poly([(sl - 14 * k + s, 0), (sl + 22 * k, 0), (sl + 22 * k - s, 1.6 * t), (sl - 14 * k, 1.6 * t)]))
+    if deco == "blocks":  # square-ended bar + separate block
+        return (d_poly([(0, 0), (sl - 34 * k, 0), (sl - 34 * k, 1.6 * t), (0, 1.6 * t)]) + " " +
+                d_poly([(sl - 22 * k, 0), (sl, 0), (sl, 1.6 * t), (sl - 22 * k, 1.6 * t)]))
+    if deco == "circles":  # row of dots
+        n = max(5, int(sl / (30 * k)))
+        return " ".join(d_circle(i * sl / (n - 1), 8 * k, 7 * k) for i in range(n))
+    if deco == "meme":  # zigzag band
+        step = 26 * k
+        n = max(4, int(sl / step))
+        top = [(i * sl / n, 0 if i % 2 == 0 else 12 * k) for i in range(n + 1)]
+        return d_poly(top + [(x, y + 9 * k) for x, y in reversed(top)])
+    # soft: tapered swoosh
+    u = 20 * k
+    return (f"m 0 {t:.0f} b {sl * .3:.0f} 0 {sl * .7:.0f} {-0.4 * t:.0f} {sl:.0f} 0 l {sl:.0f} {0.7 * t:.0f} "
+            f"b {sl * .7:.0f} {0.5 * t:.0f} {sl * .3:.0f} {t:.0f} 0 {u:.0f}")
+
+
+def side_marks(deco: str, cx: float, cy: float, d: int, k: float, colour: str) -> list[str]:
+    """Small marks beside the meme line (d = -1 left, +1 right). Returns ASS override+drawing strings."""
+    fill = f"\\1c{colour}\\bord{2 * k:.0f}\\3c&H00000000&\\shad0\\p1"
+    if deco == "diagonal":  # two chevrons pointing outwards
+        out = []
+        for off in (0, 20):
+            ox = cx + d * (off + 6) * k
+            pts = [(0, -18), (16, 0), (0, 18), (-9, 18), (7, 0), (-9, -18)]
+            out.append(d_poly([(ox + d * x * k, cy + y * k) for x, y in pts]))
+        return [f"{{\\an7\\pos(0,0){fill}}}{' '.join(out)}"]
+    if deco == "blocks":
+        a, b = 17 * k, 11 * k
+        x1 = cx + d * 4 * k
+        sq1 = d_poly([(x1 - a / 2, cy - 22 * k), (x1 + a / 2, cy - 22 * k), (x1 + a / 2, cy - 22 * k + a),
+                      (x1 - a / 2, cy - 22 * k + a)])
+        x2 = cx + d * 24 * k
+        sq2 = d_poly([(x2 - b / 2, cy + 4 * k), (x2 + b / 2, cy + 4 * k), (x2 + b / 2, cy + 4 * k + b),
+                      (x2 - b / 2, cy + 4 * k + b)])
+        return [f"{{\\an7\\pos(0,0){fill}}}{sq1} {sq2}"]
+    if deco == "circles":  # ring + dot
+        ring = f"{{\\an7\\pos(0,0)\\1a&HFF&\\3c{colour}\\bord{5 * k:.0f}\\shad0\\p1}}{d_circle(cx + d * 6 * k, cy, 15 * k)}"
+        dot = f"{{\\an7\\pos(0,0){fill}}}{d_circle(cx + d * 30 * k, cy - 20 * k, 6 * k)}"
+        return [ring, dot]
+    if deco == "meme":  # starburst
+        return [f"{{\\an7\\pos(0,0){fill}}}{d_star(cx + d * 14 * k, cy, 27 * k, 11 * k, 8, 10)}"]
+    out = []  # soft: 3 tapered sparks
+    for deg in ([180, 215, 145] if d < 0 else [0, 35, -35]):
+        r = math.radians(deg)
+        x0, y_0 = cx + 18 * k * math.cos(r), cy + 18 * k * math.sin(r)
+        x1, y_1 = cx + 52 * k * math.cos(r), cy + 52 * k * math.sin(r)
+        px, py = -math.sin(r) * 4 * k, math.cos(r) * 4 * k
+        out.append(f"m {x0 + px:.0f} {y_0 + py:.0f} l {x1:.0f} {y_1:.0f} l {x0 - px:.0f} {y_0 - py:.0f}")
+    return [f"{{\\an7\\pos(0,0){fill}}}{' '.join(out)}"]
 
 # Style line template: margins come from the layout (where the clip sits in the frame)
 CLIP_ASS_STYLES = """Style: Caption,DejaVu Sans,96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,8,3,2,70,70,{caption_v},1
@@ -433,9 +546,12 @@ def accent_words(line: str, accent: str, colour: str = ACCENT) -> str:
 
 
 def pop_title(text: str, accent: str, duration: float, y0: int, fs: int, wrap: int, k: float = 1.0,
-              style: str = "Pop") -> tuple[list[str], float]:
-    """"Pop" title: tilted bold text with the key word in yellow, a yellow swoosh under it and sparks on both
-    sides. k scales the strokes (1 = Reel, bigger for the cover). Returns the events and the y under the swoosh."""
+              style: str = "Pop", theme: dict | None = None) -> tuple[list[str], float]:
+    """"Pop" title: tilted bold text with the key word in the theme colour, the theme underline under it and the
+    theme marks on both sides. k scales the strokes (1 = Reel, bigger for the cover). Returns the events and the y
+    under the underline."""
+    th = theme or theme_of(None)
+    col = th["c"]
     lines = balanced_wrap(ass_escape(text), wrap)
     n = len(lines)
     lh, ang = fs * 1.05, 5
@@ -447,44 +563,34 @@ def pop_title(text: str, accent: str, duration: float, y0: int, fs: int, wrap: i
         dx, dy = x - 540, y - cy
         return 540 + dx * math.cos(a) - dy * math.sin(a), cy + dx * math.sin(a) + dy * math.cos(a)
 
-    def spark(cx: float, cy_: float, angles: list[int]) -> str:  # 3 tapered strokes radiating from a point
-        out = []
-        for deg in angles:
-            r = math.radians(deg)
-            x0, y_0 = cx + 18 * k * math.cos(r), cy_ + 18 * k * math.sin(r)
-            x1, y_1 = cx + 52 * k * math.cos(r), cy_ + 52 * k * math.sin(r)
-            px, py = -math.sin(r) * 4 * k, math.cos(r) * 4 * k
-            out.append(f"m {x0 + px:.0f} {y_0 + py:.0f} l {x1:.0f} {y_1:.0f} l {x0 - px:.0f} {y_0 - py:.0f}")
-        return " ".join(out)
-
-    draw = f"\\1c{POP_YELLOW}\\bord{2 * k:.0f}\\3c&H00000000&\\shad0\\p1"
-    body = "\\N".join(accent_words(line, accent, POP_YELLOW) for line in lines)
+    draw = f"\\1c{col}\\bord{2 * k:.0f}\\3c&H00000000&\\shad0\\p1"
+    body = "\\N".join(accent_words(line, accent, col) for line in lines)
     ev = [f"Dialogue: 4,{t0},{t1},{style},,0,0,0,,{{\\an8\\pos(540,{y0})\\fs{fs}\\frz{ang}\\org(540,{cy:.0f})}}{body}"]
     half = lambda line: len(line) * fs * 0.43 / 2  # approximate half width of a line (Montserrat Black)
     sl = min(2 * half(max(lines, key=len)) * 0.85, 640 * k)
     sx, sy = rot(540, y0 + n * lh + 10 * k)
-    t, u = 10 * k, 20 * k
     ev.append(f"Dialogue: 3,{t0},{t1},Draw,,0,0,0,,{{\\an7\\pos({sx - sl / 2:.0f},{sy:.0f})\\frz{ang}{draw}}}"
-              f"m 0 {t:.0f} b {sl * .3:.0f} 0 {sl * .7:.0f} {-0.4 * t:.0f} {sl:.0f} 0 l {sl:.0f} {0.7 * t:.0f} "
-              f"b {sl * .7:.0f} {0.5 * t:.0f} {sl * .3:.0f} {t:.0f} 0 {u:.0f}{{\\p0}}")
+              f"{underline_shape(th['deco'], sl, k)}{{\\p0}}")
     lx, ly = rot(540 - half(lines[0]) - 22 * k, y0 + lh * 0.5)
     rx, ry = rot(540 + half(lines[-1]) + 22 * k, y0 + lh * (n - 0.5))
-    ev.append(f"Dialogue: 3,{t0},{t1},Draw,,0,0,0,,{{\\an7\\pos(0,0){draw}}}"
-              f"{spark(lx, ly, [180, 215, 145])} {spark(rx, ry, [0, 35, -35])}{{\\p0}}")
+    for mark in side_marks(th["deco"], lx, ly, -1, k, col) + side_marks(th["deco"], rx, ry, 1, k, col):
+        ev.append(f"Dialogue: 3,{t0},{t1},Draw,,0,0,0,,{mark}{{\\p0}}")
     return ev, y0 + n * lh + 30 * k
 
 
-def pop_top_events(text: str, accent: str, watermark: str, credit: str, duration: float) -> list[str]:
-    """Pop meme line above the clip, then the page handle (small yellow underline) and the source credit."""
+def pop_top_events(text: str, accent: str, watermark: str, credit: str, duration: float,
+                   theme: dict | None = None) -> list[str]:
+    """Pop meme line above the clip, then the page handle (small theme underline) and the source credit."""
+    th = theme or theme_of(None)
     n = len(balanced_wrap(ass_escape(text), 18))
-    ev, bottom = pop_title(text, accent, duration, TEXT_TOP, 88 if n <= 2 else 70, 18)
+    ev, bottom = pop_title(text, accent, duration, TEXT_TOP, 88 if n <= 2 else 70, 18, theme=th)
     t0, t1 = ass_time(0), ass_time(duration)
     hy = bottom + 18
     if watermark:
         ev.append(f"Dialogue: 2,{t0},{t1},PopHandle,,0,0,0,,{{\\an8\\pos(540,{hy:.0f})}}{ass_escape(watermark)}")
         hl = 260
         ev.append(f"Dialogue: 2,{t0},{t1},Draw,,0,0,0,,{{\\an7\\pos({540 - hl / 2:.0f},{hy + 48:.0f})"
-                  f"\\1c{POP_YELLOW}\\bord0\\shad0\\p1}}m 0 6 b 78 0 182 -2 {hl} 0 l {hl} 4 b 182 3 78 7 0 11{{\\p0}}")
+                  f"\\1c{th['c']}\\bord0\\shad0\\p1}}{underline_shape(th['deco'], hl, 0.45)}{{\\p0}}")
     if credit:
         ev.append(f"Dialogue: 1,{t0},{t1},PopCredit,,0,0,0,,{{\\an8\\pos(540,{hy + 60:.0f})}}{ass_escape(credit)}")
     return ev
@@ -502,21 +608,98 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: CoverTitle,Montserrat Black,124,&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,0,0,0,0,100,100,0,0,1,7,8,8,30,30,0,1
 Style: CoverLabel,Montserrat Black,64,&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,0,0,0,0,100,100,2,0,1,5,5,2,0,0,0,1
 Style: CoverHandle,Montserrat ExtraBold,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,0,0,0,0,100,100,0,0,1,3,3,2,0,0,0,1
+Style: CoverBadge,Montserrat Black,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,3,0,1,0,0,5,0,0,0,1
 Style: Draw,DejaVu Sans,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+# Cover layout (fixed for every theme), inside the 3:4 area of the profile grid (y 240-1680):
+# badge on top, title, then logo + streamer + handle at the bottom
+COVER_BADGE_Y, COVER_TITLE_Y, COVER_LOGO_Y, COVER_LOGO = 278, 350, 1362, 124
+COVER_BADGE_TEXT = "VIRAL CLIP"
 
 
-def build_cover_ass(title: str, accent: str, label: str, handle: str) -> str:
-    """Instagram cover: big pop title, streamer name and page handle, all inside the 3:4 area the profile grid
-    shows (y 240-1680), over soft dark bands so the text reads on any frame."""
+def cover_decor(th: dict) -> list[str]:
+    """Theme background shapes and frame of the cover (behind the texts). Returns 'override}drawing' strings."""
+    c, deco = th["c"], th["deco"]
+    a = lambda alpha: ass_rgb(th["hex"], alpha)
+    out = []
+    if deco == "soft":  # two soft glowing blobs
+        out.append(f"\\1c{a(0)}\\1a&H90&\\bord0\\shad0\\blur45\\p1}}{d_circle(70, 330, 230)} {d_circle(1030, 900, 200)}")
+    elif deco == "diagonal":  # stripes in two corners + cut corners
+        st = lambda x, y, h: d_poly([(x, y), (x + 34, y), (x + 34 - h * .6, y + h), (x - h * .6, y + h)])
+        out.append(f"\\1c{c}\\1a&H70&\\bord0\\shad0\\p1}}" + " ".join(st(960 + i * 64, 240, 210) for i in range(3)))
+        out.append(f"\\1c{c}\\1a&H70&\\bord0\\shad0\\p1}}" + " ".join(st(150 + i * 64, 1100, 210) for i in range(3)))
+        out.append(f"\\1c{c}\\bord0\\shad0\\p1}}{d_poly([(0, 240), (130, 240), (0, 370)])} "
+                   f"{d_poly([(1080, 1680), (950, 1680), (1080, 1550)])}")
+    elif deco == "blocks":  # stacked bars + corner brackets
+        out.append(f"\\1c{c}\\1a&H60&\\bord0\\shad0\\p1}}"
+                   f"{d_poly([(40, 1180), (190, 1180), (190, 1210), (40, 1210)])} "
+                   f"{d_poly([(40, 1226), (120, 1226), (120, 1256), (40, 1256)])} "
+                   f"{d_poly([(890, 1080), (1040, 1080), (1040, 1110), (890, 1110)])}")
+        L, T, i0, j0, i1, j1 = 90, 12, 34, 252, 1046, 1668
+        br = [d_poly([(i0, j0), (i0 + L, j0), (i0 + L, j0 + T), (i0 + T, j0 + T), (i0 + T, j0 + L), (i0, j0 + L)]),
+              d_poly([(i1, j0), (i1 - L, j0), (i1 - L, j0 + T), (i1 - T, j0 + T), (i1 - T, j0 + L), (i1, j0 + L)]),
+              d_poly([(i0, j1), (i0 + L, j1), (i0 + L, j1 - T), (i0 + T, j1 - T), (i0 + T, j1 - L), (i0, j1 - L)]),
+              d_poly([(i1, j1), (i1 - L, j1), (i1 - L, j1 - T), (i1 - T, j1 - T), (i1 - T, j1 - L), (i1, j1 - L)])]
+        out.append(f"\\1c{c}\\bord0\\shad0\\p1}}{' '.join(br)}")
+    elif deco == "circles":  # big rings + dotted side edges
+        out.append(f"\\1a&HFF&\\3c{c}\\3a&H60&\\bord12\\shad0\\p1}}{d_circle(1010, 300, 200)}")
+        out.append(f"\\1a&HFF&\\3c{c}\\3a&H60&\\bord10\\shad0\\p1}}{d_circle(40, 1230, 150)}")
+        dots = [d_circle(x, y, 5) for x in (28, 1052) for y in range(420, 1600, 56)]
+        out.append(f"\\1c{c}\\1a&H40&\\bord0\\shad0\\p1}}{' '.join(dots)}")
+    elif deco == "meme":  # faint burst behind the title + halftone dots + sticker frame
+        out.append(f"\\1c{c}\\1a&HC4&\\bord0\\shad0\\p1}}{d_star(540, 520, 520, 380, 14, 7)}")
+        dots = [d_circle(60 + i * 34, 1150 + j * 34, 9 - i) for i in range(7) for j in range(5)]
+        out.append(f"\\1c{c}\\1a&H50&\\bord0\\shad0\\p1}}{' '.join(dots)}")
+        out.append(f"\\1a&HFF&\\3c{c}\\bord9\\shad0\\p1}}{d_rrect(34, 262, 1046, 1672, 34)}")
+        out.append(f"\\1a&HFF&\\3c&H00FFFFFF&\\bord9\\shad0\\p1}}{d_rrect(24, 252, 1036, 1662, 34)}")
+    return out
+
+
+def cover_badge(th: dict) -> list[str]:
+    """'VIRAL CLIP' badge above the title: same text and place on every cover, shape and colours by theme."""
+    c, deco, y = th["c"], th["deco"], COVER_BADGE_Y
+    w, h = 300, 62
+    x0, x1, y0, y1 = 540 - w / 2, 540 + w / 2, y - h / 2, y + h / 2
+    ev, text = [], "\\1c&H00000000&"
+    if deco == "diagonal":
+        ev.append(f"{{\\an7\\pos(0,0)\\1c{c}\\bord0\\shad0\\p1}}{d_poly([(x0 + 18, y0), (x1 + 18, y0), (x1 - 18, y1), (x0 - 18, y1)])}")
+        text = "\\1c&H00FFFFFF&\\bord3\\3c&H00000000&"
+    elif deco == "blocks":
+        ev.append(f"{{\\an7\\pos(0,0)\\1c&H00000000&\\1a&H30&\\3c{c}\\bord5\\shad0\\p1}}{d_poly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])}")
+        text = f"\\1c{c}"
+    elif deco == "circles":
+        ev.append(f"{{\\an7\\pos(0,0)\\1c&H00000000&\\1a&H38&\\bord0\\shad0\\p1}}{d_rrect(x0 - 16, y0, x1, y1, h / 2)}")
+        ev.append(f"{{\\an7\\pos(0,0)\\1c{c}\\bord0\\shad0\\p1}}{d_circle(x0 + 22, y, 12)}")
+        text = "\\1c&H00FFFFFF&"
+    elif deco == "meme":
+        sticker = d_rrect(x0, y0, x1, y1, 10)
+        ev.append(f"{{\\an7\\pos(10,10)\\frz-6\\org(540,{y})\\1c{c}\\bord0\\shad0\\p1}}{sticker}")
+        ev.append(f"{{\\an7\\pos(0,0)\\frz-6\\org(540,{y})\\1c&H00FFFFFF&\\bord0\\shad0\\p1}}{sticker}")
+        text = "\\1c&H00000000&\\frz-6"
+    else:  # soft: rounded pill
+        ev.append(f"{{\\an7\\pos(0,0)\\1c{c}\\bord0\\shad0\\p1}}{d_rrect(x0, y0, x1, y1, h / 2)}")
+    shift = 8 if deco == "circles" else 0
+    return ([f"Dialogue: 5,0:00:00.00,0:00:05.00,Draw,,0,0,0,,{e}{{\\p0}}" for e in ev] +
+            [f"Dialogue: 6,0:00:00.00,0:00:05.00,CoverBadge,,0,0,0,,{{\\an5\\pos({540 + shift},{y + 1}){text}}}"
+             f"{COVER_BADGE_TEXT}"])
+
+
+def build_cover_ass(title: str, accent: str, label: str, handle: str, theme: str | None = None) -> str:
+    """Instagram cover: badge, big pop title, logo, streamer name and page handle, all inside the 3:4 area the
+    profile grid shows (y 240-1680), over soft dark bands so the text reads on any frame. Layout and texts are
+    the same for every theme; colour, background shapes, frame and badge shape follow the theme."""
+    th = theme_of(theme)
     n = len(balanced_wrap(ass_escape(title), 16))
     band = "{{\\an7\\pos(0,0)\\1c&H00000000&\\1a&H{a}&\\bord0\\shad0\\blur60\\p1}}m -100 {y0} l 1180 {y0} l 1180 {y1} l -100 {y1}{{\\p0}}"
-    ev = [f"Dialogue: 1,0:00:00.00,0:00:05.00,Draw,,0,0,0,,{band.format(a='50', y0=120, y1=820 if n <= 2 else 940)}",
-          f"Dialogue: 1,0:00:00.00,0:00:05.00,Draw,,0,0,0,,{band.format(a='60', y0=1460, y1=1720)}"]
-    title_ev, _ = pop_title(title, accent, 5, 330, 124 if n <= 2 else 104, 16, k=1.6, style="CoverTitle")
+    ev = [f"Dialogue: 1,0:00:00.00,0:00:05.00,Draw,,0,0,0,,{band.format(a='50', y0=120, y1=840 if n <= 2 else 960)}",
+          f"Dialogue: 1,0:00:00.00,0:00:05.00,Draw,,0,0,0,,{band.format(a='60', y0=1330, y1=1720)}"]
+    ev += [f"Dialogue: 2,0:00:00.00,0:00:05.00,Draw,,0,0,0,,{{\\an7\\pos(0,0){d}{{\\p0}}" for d in cover_decor(th)]
+    ev += cover_badge(th)
+    title_ev, _ = pop_title(title, accent, 5, COVER_TITLE_Y, 124 if n <= 2 else 104, 16, k=1.6, style="CoverTitle",
+                            theme=th)
     ev += title_ev
     if label:
         ev.append(f"Dialogue: 2,0:00:00.00,0:00:05.00,CoverLabel,,0,0,0,,{{\\an2\\pos(540,1560)}}{ass_escape(label).upper()}")
@@ -525,18 +708,28 @@ def build_cover_ass(title: str, accent: str, label: str, handle: str) -> str:
     return COVER_ASS + "\n".join(ev) + "\n"
 
 
-def make_cover(job_dir: Path, src: str, at: float, cover: dict) -> None:
-    """cover.jpg from the clip itself (no Reel overlays): the frame at `at` zoomed to fill 9:16 + build_cover_ass."""
+def make_cover(job_dir: Path, src: str, at: float, cover: dict, theme: str | None = None) -> None:
+    """cover.jpg from the clip itself (no Reel overlays): the frame at `at` zoomed to fill 9:16, build_cover_ass
+    and the round logo above the streamer name."""
     (job_dir / "cover.ass").write_text(build_cover_ass(cover["title"], cover.get("accent", ""), cover.get("label", ""),
-                                                      cover.get("handle", "")))
-    run(["ffmpeg", "-y", "-v", "error", "-ss", f"{max(at, 0):.2f}", "-i", src, "-frames:v", "1", "-vf",
-         f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},eq=contrast=1.08:saturation=1.15,"
-         f"vignette=PI/4,ass=cover.ass", "-q:v", "2", "cover.jpg"], cwd=job_dir)
+                                                      cover.get("handle", ""), cover.get("theme") or theme))
+    frame = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},eq=contrast=1.08:saturation=1.15,"
+             f"vignette=PI/4,ass=cover.ass")
+    cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{max(at, 0):.2f}", "-i", src]
+    if LOGO.exists():
+        cmd += ["-i", str(LOGO), "-filter_complex",
+                f"[0:v]{frame}[bg];[1:v]scale={COVER_LOGO}:{COVER_LOGO}[logo];"
+                f"[bg][logo]overlay=(W-w)/2:{COVER_LOGO_Y}"]
+    else:
+        cmd += ["-vf", frame]
+    run(cmd + ["-frames:v", "1", "-q:v", "2", "cover.jpg"], cwd=job_dir)
 
 
 def build_clip_ass(words: list[dict], hook: str, hook_seconds: float, watermark: str, credit: str,
                    duration: float, layout: dict, words_per_caption: int = 3, top_text: str = "",
-                   top_accent: str = "", top_style: str = "pop") -> str:
+                   top_accent: str = "", top_style: str = "pop", theme: str | None = None) -> str:
+    th = theme_of(theme)
+    highlight = th["c"] if theme else HIGHLIGHT
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {W}
@@ -554,7 +747,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     lines = []
     if top_text and top_style == "pop":  # tilted meme line + handle + credit, all above the clip
         hook = ""
-        lines += pop_top_events(top_text, top_accent, watermark, credit, duration)
+        lines += pop_top_events(top_text, top_accent, watermark, credit, duration, th)
         watermark = credit = ""
     elif top_text:  # meme-style line that frames the clip for its whole length (replaces the hook)
         hook = ""
@@ -581,7 +774,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             end = chunk[j + 1]["start"] if j + 1 < len(chunk) else group_end
             if end <= start:
                 continue
-            shown = " ".join(f"{{\\c{HIGHLIGHT}}}{t}{{\\c&H00FFFFFF&}}" if k == j else t for k, t in enumerate(texts))
+            shown = " ".join(f"{{\\c{highlight}}}{t}{{\\c&H00FFFFFF&}}" if k == j else t for k, t in enumerate(texts))
             lines.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Caption,,0,0,0,,{shown}")
     if watermark:  # takes the hook's place once the hook is gone
         lines.append(f"Dialogue: 1,{ass_time(hook_end if hook else 0)},{ass_time(duration)},Watermark,,0,0,0,,"
@@ -747,7 +940,7 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     (job_dir / "subs.ass").write_text(build_clip_ass(
         words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), params.get("credit", ""),
         duration, layout, int(params.get("words_per_caption", 3)), params.get("top_text", ""),
-        params.get("top_accent", ""), params.get("top_style", "pop")))
+        params.get("top_accent", ""), params.get("top_style", "pop"), params.get("theme")))
 
     t = f"(on/{FPS})"
     zoom = f"1+0.06*{t}/{duration:.3f}"
@@ -771,7 +964,8 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
               f"[c]scale={gw}:{GAME_H},crop={W}:{GAME_H}:{gx}:0,zoompan=z='{zoom}':d=1:x='iw/2-(iw/zoom/2)':"
               f"y='ih/2-(ih/zoom/2)':s={W}x{GAME_H}:fps={FPS},setsar=1[game];"
               f"[bg][cam]overlay=0:{CAM_TOP}[t];[t][game]overlay=0:{gy},"
-              f"drawbox=x=0:y={gy - 3}:w={W}:h=6:color=0xFFD221@1:t=fill," + end_chain)
+              f"drawbox=x=0:y={gy - 3}:w={W}:h=6:color=0x{theme_of(params.get('theme'))['hex'][1:]}@1:t=fill,"
+              + end_chain)
     else:
         vf = (f"[0:v]fps={FPS},setsar=1,split=2[a][b];" + bg +
               f"[b]{prep},zoompan=z='{zoom}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={fg_w}x{fg_h}:fps={FPS},setsar=1[fg];"
@@ -804,7 +998,7 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     if cover.get("title"):  # designed Instagram cover; on any problem finish() falls back to a plain frame
         try:
             at = float(emph) if emph is not None else min(src_dur * 0.4, src_dur - 0.5)
-            make_cover(job_dir, "clip_src.mp4", min(at, max(src_dur - 0.2, 0)), cover)
+            make_cover(job_dir, "clip_src.mp4", min(at, max(src_dur - 0.2, 0)), cover, params.get("theme"))
         except Exception:
             (job_dir / "cover.jpg").unlink(missing_ok=True)
     return finish(job_dir, job_id, duration, len(words),
