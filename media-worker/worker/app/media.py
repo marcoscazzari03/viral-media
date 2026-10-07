@@ -8,6 +8,7 @@ Whether a source may be used is decided upstream (rights_status in n8n), not her
 import json
 import math
 import os
+import shutil
 import subprocess
 import textwrap
 import threading
@@ -727,8 +728,12 @@ def make_cover(job_dir: Path, src: str, at: float, cover: dict, theme: str | Non
 
 def build_clip_ass(words: list[dict], hook: str, hook_seconds: float, watermark: str, credit: str,
                    duration: float, layout: dict, words_per_caption: int = 3, top_text: str = "",
-                   top_accent: str = "", top_style: str = "pop", theme: str | None = None) -> str:
+                   top_accent: str = "", top_style: str = "pop", theme: str | None = None,
+                   caption_spots: list[dict] | None = None) -> str:
+    """caption_spots: [{t0, t1, y}] where the captions go instead of their usual place (y = their bottom edge),
+    e.g. right over the streamer's own subtitles hidden under a blur."""
     th = theme_of(theme)
+    spot = lambda t: next((f"{{\\an2\\pos(540,{c['y']})}}" for c in caption_spots or [] if c["t0"] <= t < c["t1"]), "")
     highlight = th["c"] if theme else HIGHLIGHT
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -775,7 +780,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if end <= start:
                 continue
             shown = " ".join(f"{{\\c{highlight}}}{t}{{\\c&H00FFFFFF&}}" if k == j else t for k, t in enumerate(texts))
-            lines.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Caption,,0,0,0,,{shown}")
+            lines.append(f"Dialogue: 2,{ass_time(start)},{ass_time(end)},Caption,,0,0,0,,{spot(start)}{shown}")
     if watermark:  # takes the hook's place once the hook is gone
         lines.append(f"Dialogue: 1,{ass_time(hook_end if hook else 0)},{ass_time(duration)},Watermark,,0,0,0,,"
                      f"{{\\fad(250,0)}}{ass_escape(watermark)}")
@@ -884,6 +889,87 @@ def detect_facecam(job_dir: Path, src: Path, sw: int, sh: int, duration: float) 
             "face_cx": (fx + fw / 2) * k}
 
 
+SUBS_FPS, SUBS_W = 4, 960  # burned-in subtitle detection: samples per second and analysis width
+
+
+def detect_burned_subs(job_dir: Path, src: Path, sw: int, sh: int, duration: float) -> list[dict]:
+    """Finds the streamer's own burned-in subtitles: outlined white text (bright pixels touching dark ones),
+    one or two centred lines in the lower half, that change over time. Static texts (timers, overlays, HUD) are
+    dropped. Returns time segments with the box to hide, in source pixels: [{t0, t1, x, y, w, h}]."""
+    import cv2
+    import numpy as np
+    d = job_dir / "subs_frames"
+    d.mkdir(exist_ok=True)
+    run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-vf", f"fps={SUBS_FPS},scale={SUBS_W}:-2",
+         "-q:v", "3", str(d / "f_%04d.jpg")])
+    files = sorted(d.glob("f_*.jpg"))
+    sc = sw / SUBS_W
+    found, masks = [], []  # per sample: candidate line boxes (x, y, w, h) at analysis scale, text mask
+    for f in files:
+        img = cv2.imread(str(f))
+        if img is None:
+            found.append([])
+            masks.append(None)
+            continue
+        h, w = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        bright = ((gray > 200) & (hsv[:, :, 1] < 90)).astype(np.uint8)  # white (or near) letters
+        dark = cv2.dilate((gray < 60).astype(np.uint8), np.ones((5, 5), np.uint8))  # their outline
+        text = bright & dark
+        text[: int(h * 0.48)] = 0
+        masks.append(text)
+        # horizontal closing only: letters merge into a line, lines (and a bar under them) stay separate
+        lines = cv2.morphologyEx(text * 255, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (int(w * .03), 1)))
+        lines = cv2.dilate(lines, np.ones((3, 1), np.uint8))
+        n, _, stats, _ = cv2.connectedComponentsWithStats(lines)
+        boxes = []
+        for x, y, bw, bh, area in stats[1:]:
+            fill = text[y:y + bh, x:x + bw].mean() if bw and bh else 0
+            if (0.025 * h <= bh <= 0.13 * h and bw >= 0.06 * w and bw / bh >= 2.2 and fill >= 0.06
+                    and abs(x + bw / 2 - w / 2) <= 0.12 * w):
+                boxes.append((int(x), int(y), int(bw), int(bh)))
+        found.append(boxes)
+    shutil.rmtree(d, ignore_errors=True)
+    # static texts (overlay bars, HUD): the box content is the same 2-3 s earlier and later, while a subtitle
+    # changes with the speech. A subtitle merged with a bar under it still changes, so it is kept.
+    def is_static(i: int, b: tuple) -> bool:
+        x, y, bw, bh = b
+        diffs = [(masks[i][y:y + bh, x:x + bw] != masks[j][y:y + bh, x:x + bw]).mean()
+                 for j in (i - 12, i - 8, i + 8, i + 12) if 0 <= j < len(masks) and masks[j] is not None]
+        return bool(diffs) and max(diffs) < 0.02
+    found = [[b for b in bs if not is_static(i, b)] for i, bs in enumerate(found)]
+    # each subtitle line is tracked on its own (two lines, or two kinds of text, never become one big box);
+    # a line seen in a single sample is noise
+    tracks, open_, dt = [], [], 1 / SUBS_FPS
+    for i, bs in enumerate(found):
+        nxt = []
+        for b in bs:
+            yc = b[1] + b[3] / 2
+            tr = next((t for t in open_ if t not in nxt and abs(t["yc"] - yc) < 0.035 * SUBS_W), None)
+            if tr is None:
+                tr = {"yc": yc, "i0": i, "box": [b[0], b[1], b[0] + b[2], b[1] + b[3]]}
+                tracks.append(tr)
+            else:
+                bx = tr["box"]
+                tr["box"] = [min(bx[0], b[0]), min(bx[1], b[1]), max(bx[2], b[0] + b[2]), max(bx[3], b[1] + b[3])]
+            tr["i1"] = i
+            nxt.append(tr)
+        open_ = nxt
+    segs, pad = [], 0.012 * SUBS_W
+    for tr in tracks:
+        if tr["i1"] == tr["i0"]:
+            continue
+        x0, y0, x1, y1 = tr["box"]
+        segs.append({"t0": round(max(tr["i0"] * dt - dt, 0), 2), "t1": round(min((tr["i1"] + 1) * dt + dt / 2, duration), 2),
+                     "x": max(int((x0 - pad) * sc), 0), "y": max(int((y0 - pad) * sc), 0),
+                     "w": min(int((x1 - x0 + 2 * pad) * sc), sw), "h": min(int((y1 - y0 + 2 * pad) * sc), sh)})
+    segs.sort(key=lambda g: g["t0"])
+    if os.environ.get("SUBS_DEBUG"):
+        print("burned subs:", len(files), "samples,", len(segs), "segments", segs)
+    return segs
+
+
 def hide_band(value) -> tuple[float, float] | None:
     """Band of the source (fractions of its height) holding the streamer's burned-in subtitles:
     "0.79-0.93" or [0.79, 0.93]. None when missing or invalid."""
@@ -950,11 +1036,29 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     if band and not cam:  # our captions sit right on the hidden band, where the streamer's subtitles were
         centre = fg_top + fg_h * (band[0] + band[1]) / 2
         layout["caption_v"] = max(int(H - centre - 50), 390)
+    # hide_subs "auto": the streamer's burned-in subtitles are found frame by frame and blurred only where and
+    # while they are on screen; our captions go right over them
+    subs_boxes, spots = [], []
+    if params.get("hide_subs") == "auto":
+        try:
+            subs_boxes = detect_burned_subs(job_dir, src, sw, sh, src_dur)
+        except Exception:
+            subs_boxes = []
+        for b in subs_boxes:
+            cy = b["y"] + b["h"] / 2
+            if cam:  # gameplay panel: the full source height scaled to GAME_H under the webcam
+                ry = CAM_TOP + CAM_H + cy / sh * GAME_H
+            elif sh >= sw:  # vertical source filling the frame
+                k = max(W / sw, H / sh)
+                ry = cy * k - (sh * k - H) / 2
+            else:
+                ry = fg_top + cy / sh * fg_h
+            spots.append({"t0": b["t0"], "t1": b["t1"], "y": int(min(max(ry + 50, CLIP_TOP + 150), H - 390))})
     hook_seconds = float(params.get("hook_seconds") or 2.5)
     (job_dir / "subs.ass").write_text(build_clip_ass(
         words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), params.get("credit", ""),
         duration, layout, int(params.get("words_per_caption", 3)), params.get("top_text", ""),
-        params.get("top_accent", ""), params.get("top_style", "pop"), params.get("theme")))
+        params.get("top_accent", ""), params.get("top_style", "pop"), params.get("theme"), spots))
 
     t = f"(on/{FPS})"
     zoom = f"1+0.06*{t}/{duration:.3f}"
@@ -970,7 +1074,13 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     # streamer's own burned-in subtitles: their band of the source is blurred and darkened before anything else
     # (so it is hidden in the clip and in the blurred background) and our captions run over it
     src = f"[0:v]fps={FPS},setsar=1"
-    if band:
+    if subs_boxes:
+        boxes = ",".join(f"drawbox=x={b['x']}:y={b['y']}:w={b['w']}:h={b['h']}:color=white:t=fill:"
+                         f"enable='between(t,{b['t0']},{b['t1']})'" for b in subs_boxes)
+        src += (f",split=2[s0][s1];[s1]boxblur=22:3,eq=brightness=-0.05[sb];"
+                f"color=black:s={sw}x{sh}:r={FPS}:d={src_dur + 1:.2f},format=gray,{boxes},boxblur=6:1[sm];"
+                f"[sb][sm]alphamerge[sa];[s0][sa]overlay=0:0:shortest=1")
+    elif band:
         by0, bh = even(sh * band[0]), even(sh * (band[1] - band[0]))
         src += (f",split=2[s0][s1];[s1]crop={sw}:{bh}:0:{by0},boxblur={min(30, bh // 2 - 1)}:4,"
                 f"eq=brightness=-0.07[band];[s0][band]overlay=0:{by0}")
