@@ -33,6 +33,17 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [ ] Workflow n8n per pubblicare su TikTok in automatico (stesso endpoint `/tiktok/post`).
 - [ ] Rigenerare `API_TOKEN` del server e secret TikTok Sandbox (sono passati in chat).
 
+## Da fare (7 ottobre)
+- [ ] Mattina: svuotare `publish_force_post_key`; rimettere `factory_max_reels_per_day` = 3 e `publish_max_per_day` = 2
+  (`publish_enabled` resta 1).
+- [ ] Facebook: la condivisione automatica Instagram → Pagina NON vale per i post pubblicati via API (Pagina ancora a
+  0 post). Soluzione: workflow `07 - US VIRAL | Facebook Publisher` che pubblica lo stesso Reel sulla Pagina con
+  l'API Reels delle Pagine (`/{page-id}/video_reels`), un'ora dopo Instagram, con avviso Telegram.
+  Da fare prima, dall'utente: caso d'uso "Gestisci tutto sulla tua Pagina" nell'app Meta, token della Pagina
+  (pages_show_list, pages_read_engagement, pages_manage_posts), credenziale n8n "US VIRAL - Facebook Page".
+  Intanto: Reel di Jynxzi pubblicabile a mano da Meta Business Suite.
+- [ ] Il README dice ancora "Facebook via Meta auto-share": aggiornare quando c'è il workflow 07.
+
 ## Blocco Meta (6 ottobre)
 - [x] Pubblicazione Instagram via API bloccata ("API access blocked", 17:05): risolta completando la verifica
   dell'account Facebook. Primo Reel pubblicato via API il 7 ottobre all'01:06 (Jynxzi, layout webcam).
