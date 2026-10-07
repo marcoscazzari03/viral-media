@@ -946,6 +946,10 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     # landscape clips start under the texts (CLIP_TOP); vertical ones fill the frame and the texts sit on top
     fg_top = CLIP_TOP if fg_h + CLIP_TOP <= H else (H - fg_h) // 2
     layout = clip_layout(GAME_H + CAM_H, CAM_TOP) if cam else clip_layout(fg_h, fg_top)
+    band = hide_band(params.get("hide_band"))
+    if band and not cam:  # our captions sit right on the hidden band, where the streamer's subtitles were
+        centre = fg_top + fg_h * (band[0] + band[1]) / 2
+        layout["caption_v"] = max(int(H - centre - 50), 390)
     hook_seconds = float(params.get("hook_seconds") or 2.5)
     (job_dir / "subs.ass").write_text(build_clip_ass(
         words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), params.get("credit", ""),
@@ -966,11 +970,10 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     # streamer's own burned-in subtitles: their band of the source is blurred and darkened before anything else
     # (so it is hidden in the clip and in the blurred background) and our captions run over it
     src = f"[0:v]fps={FPS},setsar=1"
-    band = hide_band(params.get("hide_band"))
     if band:
         by0, bh = even(sh * band[0]), even(sh * (band[1] - band[0]))
-        src += (f",split=2[s0][s1];[s1]crop={sw}:{bh}:0:{by0},boxblur={min(24, bh // 2 - 1)}:3,"
-                f"eq=brightness=-0.18[band];[s0][band]overlay=0:{by0}")
+        src += (f",split=2[s0][s1];[s1]crop={sw}:{bh}:0:{by0},boxblur={min(30, bh // 2 - 1)}:4,"
+                f"eq=brightness=-0.07[band];[s0][band]overlay=0:{by0}")
     if cam:
         # gameplay: fit the panel height, crop the width away from the webcam side (so it is not shown twice)
         gw = even(sw * GAME_H / sh)
