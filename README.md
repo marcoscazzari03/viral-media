@@ -33,7 +33,7 @@ n8n plan limit of 2,500 a month shared with all other workflows of the instance.
 | Table | Content |
 |---|---|
 | `viral_config` | All settings (key / value_number / value_string): scoring, Factory style, publishing slots, YouTube, Telegram chat. |
-| `viral_sources` | Channels watched (Twitch, YouTube), priority, `has_burned_captions`, `caption_band` (where the streamer's own subtitles sit, e.g. `0.79-0.93` of the clip height: that band is blurred and our captions run the whole Reel). |
+| `viral_sources` | Channels watched (Twitch, YouTube), priority, `has_burned_captions`, `caption_band` (optional fixed band of the streamer's own subtitles). With `has_burned_captions` the render finds the streamer's subtitles frame by frame, blurs only those boxes while they are on screen and puts our captions over them for the whole Reel. |
 | `viral_candidates` | Every clip found, with score and status. |
 | `viral_posts` | Every Reel made: script, style variant, video URL, Instagram / YouTube ids, metrics. |
 | `viral_post_metrics`, `viral_account_metrics` | Analytics snapshots. |
