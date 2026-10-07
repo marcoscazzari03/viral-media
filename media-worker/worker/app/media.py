@@ -733,7 +733,9 @@ def build_clip_ass(words: list[dict], hook: str, hook_seconds: float, watermark:
     """caption_spots: [{t0, t1, y}] where the captions go instead of their usual place (y = their bottom edge),
     e.g. right over the streamer's own subtitles hidden under a blur."""
     th = theme_of(theme)
-    spot = lambda t: next((f"{{\\an2\\pos(540,{c['y']})}}" for c in caption_spots or [] if c["t0"] <= t < c["t1"]), "")
+    def spot(t: float) -> str:  # lowest active spot (closest to the usual caption place)
+        ys = [c["y"] for c in caption_spots or [] if c["t0"] <= t < c["t1"]]
+        return f"{{\\an2\\pos(540,{max(ys)})}}" if ys else ""
     highlight = th["c"] if theme else HIGHLIGHT
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -914,9 +916,13 @@ def detect_burned_subs(job_dir: Path, src: Path, sw: int, sh: int, duration: flo
         h, w = img.shape[:2]
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        bright = ((gray > 200) & (hsv[:, :, 1] < 90)).astype(np.uint8)  # white (or near) letters
-        dark = cv2.dilate((gray < 60).astype(np.uint8), np.ones((5, 5), np.uint8))  # their outline
-        text = bright & dark
+        hue, sat, val = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+        white = (gray > 200) & (sat < 90)
+        yellow = (val > 200) & (sat > 110) & (hue >= 18) & (hue <= 38)  # karaoke-style highlighted word
+        bright = (white | yellow).astype(np.uint8)
+        # letters have a dark outline, or sit on a coloured highlight box (current word)
+        edge = (gray < 60) | ((sat > 120) & (val > 80) & ~yellow)
+        text = bright & cv2.dilate(edge.astype(np.uint8), np.ones((5, 5), np.uint8))
         text[: int(h * 0.48)] = 0
         masks.append(text)
         # horizontal closing only: letters merge into a line, lines (and a bar under them) stay separate
@@ -931,13 +937,13 @@ def detect_burned_subs(job_dir: Path, src: Path, sw: int, sh: int, duration: flo
                 boxes.append((int(x), int(y), int(bw), int(bh)))
         found.append(boxes)
     shutil.rmtree(d, ignore_errors=True)
-    # static texts (overlay bars, HUD): the box content is the same 2-3 s earlier and later, while a subtitle
-    # changes with the speech. A subtitle merged with a bar under it still changes, so it is kept.
+    # static texts (overlay bars, HUD): the box content is identical to the same box 2-3 s earlier or later,
+    # while a subtitle changes with the speech. A subtitle merged with a bar under it still changes, so it is kept.
     def is_static(i: int, b: tuple) -> bool:
         x, y, bw, bh = b
         diffs = [(masks[i][y:y + bh, x:x + bw] != masks[j][y:y + bh, x:x + bw]).mean()
                  for j in (i - 12, i - 8, i + 8, i + 12) if 0 <= j < len(masks) and masks[j] is not None]
-        return bool(diffs) and max(diffs) < 0.02
+        return bool(diffs) and min(diffs) < 0.02
     found = [[b for b in bs if not is_static(i, b)] for i, bs in enumerate(found)]
     # each subtitle line is tracked on its own (two lines, or two kinds of text, never become one big box);
     # a line seen in a single sample is noise
