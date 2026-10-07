@@ -962,14 +962,15 @@ def detect_burned_subs(job_dir: Path, src: Path, sw: int, sh: int, duration: flo
             tr["i1"] = i
             nxt.append(tr)
         open_ = nxt
-    segs, pad = [], 0.012 * SUBS_W
+    segs, px, py = [], 0.03 * SUBS_W, 0.012 * SUBS_W  # wider margin at the sides: last letters, highlight box
     for tr in tracks:
         if tr["i1"] == tr["i0"]:
             continue
         x0, y0, x1, y1 = tr["box"]
+        bx, by = max(int((x0 - px) * sc), 0), max(int((y0 - py) * sc), 0)
         segs.append({"t0": round(max(tr["i0"] * dt - dt, 0), 2), "t1": round(min((tr["i1"] + 1) * dt + dt / 2, duration), 2),
-                     "x": max(int((x0 - pad) * sc), 0), "y": max(int((y0 - pad) * sc), 0),
-                     "w": min(int((x1 - x0 + 2 * pad) * sc), sw), "h": min(int((y1 - y0 + 2 * pad) * sc), sh)})
+                     "x": bx, "y": by, "w": min(int((x1 - x0 + 2 * px) * sc), sw - bx),
+                     "h": min(int((y1 - y0 + 2 * py) * sc), sh - by)})
     segs.sort(key=lambda g: g["t0"])
     if os.environ.get("SUBS_DEBUG"):
         print("burned subs:", len(files), "samples,", len(segs), "segments", segs)
