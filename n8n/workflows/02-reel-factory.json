@@ -926,7 +926,8 @@
             "status": "SCRIPTED",
             "updated_at": "={{ $now.toISO() }}",
             "meme_caption": "={{ $json.meme_caption }}",
-            "style_variant": "={{ $json.style_variant }}"
+            "style_variant": "={{ $json.style_variant }}",
+            "theme": "={{ $json.theme }}"
           }
         },
         "options": {}
@@ -1071,7 +1072,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ type: 'render', ref: $('Pick Candidate').first().json.post_key, params: { clip: { url: $('Pick Candidate').first().json.candidate.url, start: $('Parse Script').first().json.segment_start, end: $('Parse Script').first().json.segment_end }, intro: $('Parse Script').first().json.voice ? { text: $('Parse Script').first().json.intro_script, voice: $('Init Factory').first().json.config.tts_voice, speed: $('Init Factory').first().json.config.tts_speed, engine: 'kokoro' } : undefined, hook: $('Parse Script').first().json.text_style === 'hook' ? $('Parse Script').first().json.hook : '', top_text: $('Parse Script').first().json.text_style === 'meme' ? $('Parse Script').first().json.meme_caption : '', top_accent: $('Parse Script').first().json.meme_accent, top_style: $('Init Factory').first().json.config.factory_top_style ?? 'pop', cover: { title: $('Parse Script').first().json.meme_caption || $('Parse Script').first().json.hook, accent: $('Parse Script').first().json.meme_caption ? $('Parse Script').first().json.meme_accent : '', label: $('Pick Candidate').first().json.candidate.creator_name, handle: $('Init Factory').first().json.config.ig_handle }, hook_seconds: 2.5, emphasis_at: $('Parse Script').first().json.emphasis_at, credit: $('Parse Script').first().json.credit, watermark: $('Init Factory').first().json.config.ig_handle, captions: $('Get Source').first().json.has_burned_captions === true ? 'intro_only' : (($('Init Factory').first().json.config.factory_full_captions_sources.includes($('Pick Candidate').first().json.candidate.source_key) || !$('Parse Script').first().json.voice) ? true : 'intro_only') } }) }}",
+        "jsonBody": "={{ JSON.stringify({ type: 'render', ref: $('Pick Candidate').first().json.post_key, params: { clip: { url: $('Pick Candidate').first().json.candidate.url, start: $('Parse Script').first().json.segment_start, end: $('Parse Script').first().json.segment_end }, intro: $('Parse Script').first().json.voice ? { text: $('Parse Script').first().json.intro_script, voice: $('Init Factory').first().json.config.tts_voice, speed: $('Init Factory').first().json.config.tts_speed, engine: 'kokoro' } : undefined, hook: $('Parse Script').first().json.text_style === 'hook' ? $('Parse Script').first().json.hook : '', top_text: $('Parse Script').first().json.text_style === 'meme' ? $('Parse Script').first().json.meme_caption : '', top_accent: $('Parse Script').first().json.meme_accent, top_style: $('Init Factory').first().json.config.factory_top_style ?? 'pop', cover: { title: $('Parse Script').first().json.meme_caption || $('Parse Script').first().json.hook, accent: $('Parse Script').first().json.meme_caption ? $('Parse Script').first().json.meme_accent : '', label: $('Pick Candidate').first().json.candidate.creator_name, handle: $('Init Factory').first().json.config.ig_handle }, theme: $('Pick Theme').first().json.theme, hook_seconds: 2.5, emphasis_at: $('Parse Script').first().json.emphasis_at, credit: $('Parse Script').first().json.credit, watermark: $('Init Factory').first().json.config.ig_handle, captions: $('Get Source').first().json.has_burned_captions === true ? 'intro_only' : (($('Init Factory').first().json.config.factory_full_captions_sources.includes($('Pick Candidate').first().json.candidate.source_key) || !$('Parse Script').first().json.voice) ? true : 'intro_only') } }) }}",
         "options": {
           "timeout": 20000
         }
@@ -2854,6 +2855,55 @@
       "notes": "Streamer settings (has_burned_captions). Always outputs one item, even for sources not in the table.",
       "alwaysOutputData": true,
       "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Ma6ybDlHtFNlE0BJ",
+          "cachedResultName": "viral_posts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "created_at",
+              "condition": "gte",
+              "keyValue": "={{ $now.minus({ days: 7 }).toISO() }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "57e91ef0-1b97-4b8a-aaf2-abf33cacf91d",
+      "name": "Get Theme History",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3632,
+        -96
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "notes": "Reels of the last 7 days: their themes drive the rotation."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Pick Theme — visual theme of this Reel (accent colour + decorations; font, texts, layout and logo never change).\n// Rotation (feed order: published_at, else created_at): never one of the last 2 themes, then the least used in\n// the last 5 Reels, ties at random.\n// factory_force_theme (test) overrides it. Output: the Parse Script item + theme (Save Script reads $json).\n\nconst cfg = $('Load Config').all().map(i => i.json ?? {});\nconst str = key => String(cfg.find(r => r.key === key)?.value_string ?? '').trim();\nconst ALL = ['yellow', 'red', 'blue', 'green', 'purple'];\nconst themes = str('factory_themes').split(',').map(s => s.trim().toLowerCase()).filter(t => ALL.includes(t));\nconst pool = themes.length ? themes : ALL;\n\nconst recent = $input.all().map(i => i.json ?? {})\n  .filter(p => p.theme && !['FAILED', 'SKIPPED'].includes(p.status))\n  .sort((a, b) => Date.parse(b.published_at || b.created_at) - Date.parse(a.published_at || a.created_at))\n  .map(p => p.theme);\nconst last2 = recent.slice(0, 2);\nconst uses = t => recent.slice(0, 5).filter(x => x === t).length;\nlet options = pool.filter(t => !last2.includes(t));\nif (!options.length) options = pool;\nconst min = Math.min(...options.map(uses));\nconst best = options.filter(t => uses(t) === min);\n\nconst forced = str('factory_force_theme').toLowerCase();\nconst theme = ALL.includes(forced) ? forced : best[Math.floor(Math.random() * best.length)];\nreturn [{ json: { ...$('Parse Script').first().json, theme } }];\n"
+      },
+      "id": "ca9a7626-fc24-4469-961b-b290ac640314",
+      "name": "Pick Theme",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3856,
+        -96
+      ],
+      "executeOnce": true
     }
   ],
   "connections": {
@@ -3034,7 +3084,7 @@
       "main": [
         [
           {
-            "node": "Save Script",
+            "node": "Get Theme History",
             "type": "main",
             "index": 0
           }
@@ -3288,6 +3338,28 @@
           }
         ]
       ]
+    },
+    "Get Theme History": {
+      "main": [
+        [
+          {
+            "node": "Pick Theme",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Theme": {
+      "main": [
+        [
+          {
+            "node": "Save Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -3437,6 +3509,15 @@
         "Collected Candidate Failed"
       ],
       "description": "Post FAILED + candidate FAILED"
+    },
+    {
+      "id": "25764e59-6b70-4e05-bc1c-da2a3fc1a24d",
+      "name": "Theme",
+      "nodeNames": [
+        "Get Theme History",
+        "Pick Theme"
+      ],
+      "description": "Visual theme rotation (never one of the last 2, least used in the last 5)"
     }
   ],
   "meta": {

@@ -53,7 +53,11 @@ finds the webcam (OpenCV face detection, trimmed to the overlay's borders), show
 texts and the gameplay below it, with a yellow line between (`layout` render param: auto / split / center). Above the clip, the "pop" meme line for the whole Reel: Montserrat Black,
 tilted, key word in yellow, yellow swoosh and sparks, then the page handle and the streamer credit. The AI
 voice-over plays on about half of the Reels (A/B test, `style_variant`). Each Reel gets a designed Instagram cover
-(punch-moment frame full screen, pop title, streamer name, handle) laid out for the 3:4 profile grid.
+(punch-moment frame full screen, "VIRAL CLIP" badge, pop title, logo, streamer name, handle) laid out for the 3:4
+profile grid. Five visual themes (yellow / soft, red / diagonal, blue / blocks, green / circles, purple / meme) change
+only the accent colour and the decorations (underline, side marks, background shapes, badge shape, frame); font,
+texts, layout and logo never change. The Factory rotates them (`theme` in `viral_posts`): never one of the last 2,
+the least used of the last 5 (`factory_themes`, `factory_force_theme` for tests).
 
 ## Media worker
 
