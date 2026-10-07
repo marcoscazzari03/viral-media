@@ -353,16 +353,19 @@ def finish(job_dir: Path, job_id: str, duration: float, captions: int, keep: tup
 
 
 # ---------------------------------------------------------------- render: clip mode
-# Reel layout (1080x1920):
-#   y ~150-330  hook for the first seconds, or a short meme-style line (top_text) for the whole Reel
-#   y ~335      page watermark (after the hook, or from the start with top_text)
-#   y ~395      small source credit
-#   centre      the clip, wider than the frame (sides cropped) over a blurred copy of itself,
+# Reel layout (1080x1920), kept out of Instagram's own overlays (top ~200 px, bottom ~400 px):
+#   y ~220-560  short meme-style line (top_text) for the whole Reel, or the hook for the first seconds,
+#               then the page handle and the small source credit
+#   y 580-      the clip, wider than the frame (sides cropped) over a blurred copy of itself,
 #               slow zoom-in + an optional punch zoom on the key moment
+#               (split layout when the clip has a streamer webcam: webcam panel, then gameplay panel)
 #   y ~1500     big captions, current word highlighted
 # Our voice-over plays over the first seconds of the moving clip (original audio ducked under it):
 # no frozen intro frame, the clip is in motion from frame one.
 AUDIO_OUT = ["-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"]
+# Instagram covers the top ~200 px (account name, "Original audio") and the bottom ~400 px (caption, buttons):
+# the texts start under the top band and the clip right under the texts
+TEXT_TOP, CLIP_TOP = 220, 580
 HIGHLIGHT = "&H0000E6FF&"  # ASS colours are BGR: yellow #FFE600
 ACCENT = "&H00FF5CB4&"  # brand purple #B45CFF, for the key word of the meme line (top_accent, "clean" style)
 POP_YELLOW = "&H0021D2FF&"  # #FFD221: key word, underline and sparks of the "pop" meme line
@@ -474,16 +477,16 @@ def pop_title(text: str, accent: str, duration: float, y0: int, fs: int, wrap: i
 def pop_top_events(text: str, accent: str, watermark: str, credit: str, duration: float) -> list[str]:
     """Pop meme line above the clip, then the page handle (small yellow underline) and the source credit."""
     n = len(balanced_wrap(ass_escape(text), 18))
-    ev, bottom = pop_title(text, accent, duration, 92, 88 if n <= 2 else 74, 18)
+    ev, bottom = pop_title(text, accent, duration, TEXT_TOP, 88 if n <= 2 else 70, 18)
     t0, t1 = ass_time(0), ass_time(duration)
-    hy = bottom + 28
+    hy = bottom + 18
     if watermark:
         ev.append(f"Dialogue: 2,{t0},{t1},PopHandle,,0,0,0,,{{\\an8\\pos(540,{hy:.0f})}}{ass_escape(watermark)}")
         hl = 260
-        ev.append(f"Dialogue: 2,{t0},{t1},Draw,,0,0,0,,{{\\an7\\pos({540 - hl / 2:.0f},{hy + 50:.0f})"
+        ev.append(f"Dialogue: 2,{t0},{t1},Draw,,0,0,0,,{{\\an7\\pos({540 - hl / 2:.0f},{hy + 48:.0f})"
                   f"\\1c{POP_YELLOW}\\bord0\\shad0\\p1}}m 0 6 b 78 0 182 -2 {hl} 0 l {hl} 4 b 182 3 78 7 0 11{{\\p0}}")
     if credit:
-        ev.append(f"Dialogue: 1,{t0},{t1},PopCredit,,0,0,0,,{{\\an8\\pos(540,{hy + 66:.0f})}}{ass_escape(credit)}")
+        ev.append(f"Dialogue: 1,{t0},{t1},PopCredit,,0,0,0,,{{\\an8\\pos(540,{hy + 60:.0f})}}{ass_escape(credit)}")
     return ev
 
 
@@ -606,7 +609,7 @@ def script_words(text: str, timed: list[dict], duration: float) -> list[dict]:
 # ---------------------------------------------------------------- facecam split layout
 # Gaming / reaction clips with the streamer's webcam in a corner: the normal layout crops the sides and cuts it.
 # Split layout instead: texts on top, the webcam enlarged in a panel, the gameplay below (yellow line between).
-CAM_TOP, CAM_H, GAME_H = 440, 560, 740
+CAM_TOP, CAM_H, GAME_H = CLIP_TOP, 460, 640
 
 
 def detect_facecam(job_dir: Path, src: Path, sw: int, sh: int, duration: float) -> dict | None:
@@ -716,7 +719,7 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
             _, orig_words, _ = whisper_words(job_dir / "orig16k.wav", "en")
             words += [{**w, "src": "clip"} for w in orig_words if w["start"] >= voice_s - 0.1]
     # 3. video: blurred background + enlarged foreground with slow zoom and optional punch zoom
-    fg_scale = min(max(float(params.get("fg_scale", 1.7)), 1.0), 2.0)
+    fg_scale = min(max(float(params.get("fg_scale", 1.6)), 1.0), 2.0)
     if sh >= sw:  # vertical source: fill the frame
         fg_w, fg_h = W, H
         prep = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
@@ -728,7 +731,9 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     cam = None
     if params.get("layout", "auto") in ("auto", "split") and sw > sh:
         cam = detect_facecam(job_dir, src, sw, sh, src_dur)
-    layout = clip_layout(GAME_H + CAM_H, CAM_TOP) if cam else clip_layout(fg_h)
+    # landscape clips start under the texts (CLIP_TOP); vertical ones fill the frame and the texts sit on top
+    fg_top = CLIP_TOP if fg_h + CLIP_TOP <= H else (H - fg_h) // 2
+    layout = clip_layout(GAME_H + CAM_H, CAM_TOP) if cam else clip_layout(fg_h, fg_top)
     hook_seconds = float(params.get("hook_seconds") or 2.5)
     (job_dir / "subs.ass").write_text(build_clip_ass(
         words, params.get("hook", ""), hook_seconds, params.get("watermark", ""), params.get("credit", ""),
@@ -761,7 +766,7 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     else:
         vf = (f"[0:v]fps={FPS},setsar=1,split=2[a][b];" + bg +
               f"[b]{prep},zoompan=z='{zoom}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={fg_w}x{fg_h}:fps={FPS},setsar=1[fg];"
-              f"[bg][fg]overlay=(W-w)/2:(H-h)/2," + end_chain)
+              f"[bg][fg]overlay=(W-w)/2:{fg_top}," + end_chain)
 
     # 4. audio: original ducked under the voice-over, then back to full volume; fade out at the end
     inputs = ["-i", "clip_src.mp4"]
