@@ -44,6 +44,13 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
   (pages_show_list, pages_read_engagement, pages_manage_posts), credenziale n8n "US VIRAL - Facebook Page".
   Intanto: Reel di Jynxzi pubblicabile a mano da Meta Business Suite.
 - [ ] Il README dice ancora "Facebook via Meta auto-share": aggiornare quando c'è il workflow 07.
+- [x] Statistiche multi-social: 04 legge anche views / like / commenti degli Short, iscritti YouTube e collega da solo
+  gli Short caricati a mano (niente tabelle a mano); il report delle 20:20 mostra views 24h per social, variazione
+  follower / iscritti e Reel top.
+- [ ] Stasera, dopo il token della Pagina: statistiche Facebook in 04 (views Reel, follower, abbinamento dei Reel
+  condivisi a mano) e riga "💰 Incassato" nel report con i guadagni veri di YouTube (`estimatedRevenue`, YouTube
+  Analytics API, permesso OAuth di sola lettura ricavi) e Facebook (metrica guadagni delle Page Insights, da
+  verificare sull'API). Oggi $0: nessun canale è ancora monetizzato. Niente stime views × RPM.
 
 ## Blocco Meta (6 ottobre)
 - [x] Pubblicazione Instagram via API bloccata ("API access blocked", 17:05): risolta completando la verifica
