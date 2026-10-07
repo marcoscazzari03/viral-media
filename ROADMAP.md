@@ -55,7 +55,7 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 ## Più avanti
 - [ ] Rendere il repo GitHub privato: prima deploy key di sola lettura sul server (altrimenti `update.sh` non riesce più a fare `git pull`), poi Settings → Change visibility.
 - Nota esecuzioni n8n (limite 2.500/mese, condiviso con tutti i workflow): 01 e 02 ogni 2 ore, 03 alle 11-12-15-16-19-20 NY, 04 ogni 6 ore, 05 una volta al giorno, 06 alle 12-16-20 NY. Circa 40 esecuzioni al giorno (≈1.250 al mese) con YouTube attivo. **Se cambi `publish_slots_et`, vanno cambiati anche gli orari dei trigger di 03 e 06.**
-- [ ] Più streamer Twitch tra le fonti (oggi ~7: poche clip forti).
+- [x] Più streamer Twitch tra le fonti: +12 il 7 ottobre (xqc, summit1g, tarik, yourragegaming, jasontheween, silky, agent00, extraemily, emiru, sketch, nmplol, zoil), da verificare dopo qualche run del Discovery.
 - [ ] Ripulire i post di test rimasti a metà e la clip bloccata in PROCESSING.
 - [x] 2 Reel al giorno (`publish_max_per_day` = 2).
 - [x] Pubblicazione su Pagina Facebook (condivisione automatica Meta; da verificare sui primi Reel).
