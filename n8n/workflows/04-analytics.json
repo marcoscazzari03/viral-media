@@ -135,51 +135,11 @@
             "captured_at": "={{ $now.toISO() }}",
             "followers_count": "={{ $json.followers_count }}",
             "media_count": "={{ $json.media_count }}",
-            "run_id": "={{ $('Init Analytics').first().json.run_id }}"
+            "run_id": "={{ $('Init Analytics').first().json.run_id }}",
+            "platform": "instagram"
           },
           "matchingColumns": [],
-          "schema": [
-            {
-              "id": "captured_at",
-              "displayName": "captured_at",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "dateTime",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "followers_count",
-              "displayName": "followers_count",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "number",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "media_count",
-              "displayName": "media_count",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "number",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "run_id",
-              "displayName": "run_id",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "readOnly": false,
-              "removed": false
-            }
-          ],
+          "schema": [],
           "attemptToConvertTypes": false,
           "convertFieldsToString": false
         },
@@ -608,7 +568,7 @@
           "parameters": [
             {
               "name": "part",
-              "value": "contentDetails"
+              "value": "contentDetails,statistics"
             },
             {
               "name": "forHandle",
@@ -769,6 +729,70 @@
         1000
       ],
       "id": "57130756-9586-4386-9c1f-f09895fe5675"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.items?.[0]?.statistics?.subscriberCount !== undefined }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "54d4f288-d1f7-42ca-a7e9-5d551d3bce80",
+      "name": "YT Subscribers OK",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        1104,
+        1160
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "vqjHMIflVZuF6DRf",
+          "cachedResultName": "viral_account_metrics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {
+            "captured_at": "={{ $now.toISO() }}",
+            "platform": "youtube",
+            "followers_count": "={{ Number($json.items[0].statistics.subscriberCount) }}",
+            "media_count": "={{ Number($json.items[0].statistics.videoCount) }}",
+            "run_id": "={{ $('Init Analytics').first().json.run_id }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "df157c58-3c7f-4153-aba0-2047275fa19d",
+      "name": "Save YT Subscribers",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1328,
+        1160
+      ]
     }
   ],
   "connections": {
@@ -947,6 +971,11 @@
             "node": "YT Uploads",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "YT Subscribers OK",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -988,6 +1017,17 @@
           }
         ]
       ]
+    },
+    "YT Subscribers OK": {
+      "main": [
+        [
+          {
+            "node": "Save YT Subscribers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -1001,7 +1041,7 @@
     "executionTimeout": 300,
     "binaryMode": "separate"
   },
-  "description": "US VIRAL Analytics: every 6h snapshots Instagram insights and YouTube Shorts statistics of Reels published in the last 7 days (viral_post_metrics) and followers (viral_account_metrics); updates last_* / yt_* in viral_posts.",
+  "description": "US VIRAL Analytics: every 6h snapshots Instagram insights and YouTube Shorts statistics of Reels published in the last 7 days (viral_post_metrics), Instagram followers and YouTube subscribers (viral_account_metrics); links Shorts uploaded by hand; updates last_* / yt_* in viral_posts.",
   "nodeGroups": [
     {
       "id": "831f66f2-dbf5-49f5-aa62-57251cdf55bb",
@@ -1066,7 +1106,6 @@
       "id": "03977d6d-585a-4d2d-9a4f-ecd7f9b03c0b",
       "name": "YouTube Links",
       "nodeNames": [
-        "YT Channel",
         "YT Uploads",
         "YT Match Uploads"
       ],
@@ -1080,6 +1119,15 @@
         "Save YT Link"
       ],
       "description": "Write the new yt_video_id links in viral_posts"
+    },
+    {
+      "id": "a6be0cdc-f0fe-468a-958b-d910f1ec2e79",
+      "name": "YouTube Subscribers",
+      "nodeNames": [
+        "YT Subscribers OK",
+        "Save YT Subscribers"
+      ],
+      "description": "Channel subscribers snapshot (viral_account_metrics, platform=youtube)"
     }
   ],
   "meta": {
