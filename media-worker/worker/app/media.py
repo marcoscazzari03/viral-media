@@ -884,6 +884,16 @@ def detect_facecam(job_dir: Path, src: Path, sw: int, sh: int, duration: float) 
             "face_cx": (fx + fw / 2) * k}
 
 
+def hide_band(value) -> tuple[float, float] | None:
+    """Band of the source (fractions of its height) holding the streamer's burned-in subtitles:
+    "0.79-0.93" or [0.79, 0.93]. None when missing or invalid."""
+    try:
+        y0, y1 = (float(v) for v in (value.split("-") if isinstance(value, str) else value))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return (y0, y1) if 0 <= y0 < y1 <= 1 and y1 - y0 >= 0.02 else None
+
+
 def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
     clip = params["clip"]
     url = clip.get("url")
@@ -953,12 +963,20 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
           f"scale={W}:{H},setsar=1[bg];")
     end_chain = (f"tpad=stop_mode=clone:stop_duration={pad:.3f},"
                  f"ass=subs.ass,fade=t=out:st={duration - fade:.3f}:d={fade:.3f},format=yuv420p[v]")
+    # streamer's own burned-in subtitles: their band of the source is blurred and darkened before anything else
+    # (so it is hidden in the clip and in the blurred background) and our captions run over it
+    src = f"[0:v]fps={FPS},setsar=1"
+    band = hide_band(params.get("hide_band"))
+    if band:
+        by0, bh = even(sh * band[0]), even(sh * (band[1] - band[0]))
+        src += (f",split=2[s0][s1];[s1]crop={sw}:{bh}:0:{by0},boxblur={min(24, bh // 2 - 1)}:3,"
+                f"eq=brightness=-0.18[band];[s0][band]overlay=0:{by0}")
     if cam:
         # gameplay: fit the panel height, crop the width away from the webcam side (so it is not shown twice)
         gw = even(sw * GAME_H / sh)
         gx = 0 if cam["face_cx"] > sw / 2 else max(gw - W, 0)
         gy = CAM_TOP + CAM_H
-        vf = (f"[0:v]fps={FPS},setsar=1,split=3[a][b][c];" + bg +
+        vf = (f"{src},split=3[a][b][c];" + bg +
               f"[b]crop={cam['w']}:{cam['h']}:{cam['x']}:{cam['y']},"
               f"scale={W}:{CAM_H}:force_original_aspect_ratio=increase,crop={W}:{CAM_H},setsar=1[cam];"
               f"[c]scale={gw}:{GAME_H},crop={W}:{GAME_H}:{gx}:0,zoompan=z='{zoom}':d=1:x='iw/2-(iw/zoom/2)':"
@@ -967,7 +985,7 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
               f"drawbox=x=0:y={gy - 3}:w={W}:h=6:color=0x{theme_of(params.get('theme'))['hex'][1:]}@1:t=fill,"
               + end_chain)
     else:
-        vf = (f"[0:v]fps={FPS},setsar=1,split=2[a][b];" + bg +
+        vf = (f"{src},split=2[a][b];" + bg +
               f"[b]{prep},zoompan=z='{zoom}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={fg_w}x{fg_h}:fps={FPS},setsar=1[fg];"
               f"[bg][fg]overlay=(W-w)/2:{fg_top}," + end_chain)
 
