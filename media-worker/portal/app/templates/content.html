@@ -62,6 +62,7 @@
       </ul>
     </section>
 
+    {% if p.published or p.links %}
     <section class="card">
       <h2>Statistiche</h2>
       <table class="perf">
@@ -86,6 +87,7 @@
         <p class="small muted">Ancora nessuna lettura dell'Analytics (gira ogni 6 ore dopo la pubblicazione).</p>
       {% endif %}
     </section>
+    {% endif %}
 
     <section class="card">
       <h2>Testi</h2>
