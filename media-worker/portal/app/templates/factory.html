@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "_post.html" import reel %}
+{% block title %}Factory{% endblock %}
+{% block body %}
+<div class="grid4">
+  <section class="card kpi"><h3>Stato</h3><div class="state {{ factory.tone }}">{{ factory.state }}</div>
+    <div class="muted small">prossimo giro {{ factory.next_run|when }} ({{ factory.next_run|ago }})</div></section>
+  <section class="card kpi"><h3>Prodotti 24h</h3><div class="big">{{ factory.made_24h }}/{{ factory.cap }}</div>
+    <div class="muted small">factory_max_reels_per_day</div></section>
+  <section class="card kpi"><h3>Pronti</h3><div class="big">{{ factory.ready }}/{{ factory.buffer }}</div>
+    <div class="muted small">sopra il buffer la Factory si ferma</div></section>
+  <section class="card kpi"><h3>Server video</h3>
+    {% if worker %}<div class="big good">online</div><div class="muted small">{{ worker.queue }} lavori in coda</div>
+    {% else %}<div class="big bad">offline</div><div class="muted small">non raggiungibile dal portale</div>{% endif %}</section>
+</div>
+
+<div class="cols">
+  <div>
+    <section class="card">
+      <h2>Clip candidate ({{ cands|length }} idonee)</h2>
+      <p class="muted small">Le clip ELIGIBLE trovate dal Discovery. La Factory prende la prima senza blocchi: almeno {{ min_views|int }} views, streamer non usato nelle ultime {{ cooldown|int }} ore.</p>
+      <table class="tbl small">
+        <thead><tr><th>Score</th><th>Streamer / clip</th><th>Views</th><th>Stato</th></tr></thead>
+        <tbody>
+        {% for c in cands[:40] %}
+          <tr class="{{ 'dim' if c.why }}"><td><b>{{ c.score }}</b></td>
+            <td><b>{{ c.creator_name }}</b> · <a href="{{ c.url }}" target="_blank" rel="noopener">{{ c.title|truncate(60) }}</a>
+              <div class="muted">{{ c.platform }} · uscita {{ c.published|ago }}</div></td>
+            <td>{{ c.views|float|n }}</td>
+            <td>{% if c.why %}<span class="muted">{{ c.why|join(', ') }}</span>{% else %}<span class="good">utilizzabile</span>{% endif %}</td></tr>
+        {% else %}<tr><td colspan="4" class="muted">Nessuna clip idonea in questo momento.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+  <div>
+    <section class="card">
+      <h2>Ultimi 7 giorni ({{ week_n }} Reel)</h2>
+      <div class="chips">{% for st, n in per_status|dictsort %}<span class="chip">{{ st|lower }} <b>{{ n }}</b></span>{% endfor %}</div>
+    </section>
+    <section class="card">
+      <h2>Errori di render e trascrizione / scartati</h2>
+      {% for p in failures %}
+        {{ reel(p, p.status|lower ~ " · " ~ (p.updated|ago) ~ " · " ~ ((p.error or p.status_reason or '')|truncate(200))) }}
+      {% else %}<p class="muted">Nessun errore negli ultimi 7 giorni.</p>{% endfor %}
+    </section>
+    <section class="card">
+      <h2>Lavori del server video</h2>
+      {% if not mounted %}<p class="muted small">Cartella dei media non collegata.</p>{% endif %}
+      <table class="tbl small">
+        <thead><tr><th>Tipo</th><th>Stato</th><th>Durata</th><th>Quando</th></tr></thead>
+        <tbody>
+        {% for j in jobs %}
+          <tr><td>{{ j.type }}</td><td class="{{ 'bad' if j.status == 'failed' else 'good' if j.status == 'done' else '' }}">{{ j.status }}</td>
+            <td>{{ j.seconds|secs }}</td><td>{{ j.created_at_dt|ago }}</td></tr>
+          {% if j.error %}<tr><td colspan="4" class="mono bad">{{ j.error|truncate(220) }}</td></tr>{% endif %}
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+</div>
+{% endblock %}

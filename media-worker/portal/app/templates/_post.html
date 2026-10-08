@@ -5,7 +5,8 @@
     {% if p.cover_url %}<img src="{{ p.cover_url }}" alt="" loading="lazy">{% elif p.thumbnail_url %}<img src="{{ p.thumbnail_url }}" alt="" loading="lazy">{% endif %}
   </a>
   <div class="info">
-    <div class="who"><b>{{ p.creator_name }}</b>
+    <div class="who"><a class="name" href="/contenuti/{{ p.post_key|urlencode }}"><b>{{ p.creator_name }}</b></a>
+      {% if p.group %}<span class="st {{ groups[p.group][1] }}">{{ groups[p.group][0] }}</span>{% endif %}
       {% if p.theme %}<span class="theme t-{{ p.theme }}">{{ p.theme }}</span>{% endif %}
       {% if p.voice %}<span class="tag">{{ p.voice }}</span>{% endif %}
       {% if p.score %}<span class="tag" title="trend score">score {{ p.score }}</span>{% endif %}

@@ -11,6 +11,7 @@ DEFAULTS = {
     "publish_enabled": 0, "publish_slots_et": "11,15,19", "publish_max_per_day": 1, "publish_min_gap_h": 3,
     "publish_ready_max_age_h": 36, "publish_force_post_key": "",
     "factory_max_reels_per_day": 3, "factory_ready_buffer_max": 3, "factory_force_candidate_key": "",
+    "factory_min_views": 250, "factory_creator_cooldown_h": 12, "factory_platforms": "twitch",
     "factory_themes": "yellow,red,blue,green,purple", "factory_force_theme": "",
     "fb_enabled": 0, "yt_enabled": 0, "yt_max_per_day": 2, "llm_model": "",
 }
@@ -305,3 +306,58 @@ def problems(now: datetime, cfg: dict, posts: list[dict], runs: list[dict], exec
             out.append({"level": "warn", "title": f"Impostazione di prova attiva: {key}", "detail": str(cfg[key]), "at": None})
     out.sort(key=lambda x: (x["level"] != "err", -(x["at"].timestamp() if x["at"] else 0)))
     return out
+
+
+# ------------------------------------------------------------------ content list / detail (phase 2)
+STATUS_GROUPS = {  # label shown, CSS tone
+    "lavorazione": ("in lavorazione", "work"), "pronto": ("pronto", "ready"), "programmato": ("programmato", "plan"),
+    "pubblicato": ("pubblicato", "pub"), "fallito": ("fallito", "fail"), "stale": ("stale", "stale"),
+    "scartato": ("scartato", "skip"), "prova": ("prova", "test"), "bloccato": ("bloccato", "fail"),
+}
+
+
+def status_group(p: dict, now: datetime, scheduled: set) -> str:
+    st = p.get("status")
+    if p.get("test") and st == "READY":
+        return "prova"
+    if st in IN_PROGRESS:
+        return "bloccato" if stuck(p, now) else "lavorazione"
+    if st == "READY":
+        return "programmato" if p["post_key"] in scheduled else "pronto"
+    return {"PUBLISHED": "pubblicato", "FAILED": "fallito", "PUBLISH_FAILED": "fallito", "STALE": "stale",
+            "SKIPPED": "scartato"}.get(st, "lavorazione")
+
+
+def total_views(p: dict) -> int:
+    return sum(int(float(p.get(k) or 0)) for k in ("last_views", "fb_views", "yt_views"))
+
+
+def sparks(snaps: list[dict], width: int = 560, height: int = 120) -> dict:
+    """Views over time per platform as SVG polyline points (cumulative totals from the Analytics snapshots)."""
+    series: dict[str, list[tuple[float, float]]] = {}
+    for s in snaps:
+        t = parse(s.get("captured_at"))
+        if t and s.get("views") not in (None, ""):
+            series.setdefault(s.get("platform") or "instagram", []).append((t.timestamp(), float(s["views"])))
+    if not series:
+        return {}
+    t0 = min(t for pts in series.values() for t, _ in pts)
+    t1 = max(t for pts in series.values() for t, _ in pts)
+    vmax = max(v for pts in series.values() for _, v in pts) or 1
+    pad = 6
+    out = {"width": width, "height": height, "vmax": vmax, "t0": datetime.fromtimestamp(t0, timezone.utc),
+           "t1": datetime.fromtimestamp(t1, timezone.utc), "lines": []}
+    for platform, pts in sorted(series.items()):
+        pts.sort()
+        xy = [(pad + (t - t0) / ((t1 - t0) or 1) * (width - 2 * pad), height - pad - v / vmax * (height - 2 * pad))
+              for t, v in pts]
+        out["lines"].append({"platform": platform, "points": " ".join(f"{x:.1f},{y:.1f}" for x, y in xy),
+                             "last": pts[-1][1]})
+    return out
+
+
+WORKFLOW_SCHEDULES = {  # by the "NN -" prefix of the workflow name (New York time), mirrored from the triggers
+    "00": "quando un altro workflow va in errore", "01": "ogni 2 ore (:07)", "02": "ogni 2 ore (:37)",
+    "03": "11, 12, 15, 16, 19, 20 (:05)", "04": "ogni 6 ore (:25)", "05": "ogni giorno alle 20:20",
+    "06": "12, 16, 20 (:20)", "07": "12, 16, 20 (:35)",
+}

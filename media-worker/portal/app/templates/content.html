@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}{{ p.creator_name }}{% endblock %}
+{% block body %}
+<p class="small"><a href="/contenuti">← Contenuti</a></p>
+<div class="detail">
+  <div class="player card">
+    {% if p.video_url and video_on_disk is not false %}
+      <video src="{{ p.video_url }}" poster="{{ p.cover_url }}" controls preload="none" playsinline></video>
+    {% elif p.cover_url and cover_on_disk is not false %}
+      <img src="{{ p.cover_url }}" alt="">
+    {% elif p.thumbnail_url %}
+      <img src="{{ p.thumbnail_url }}" alt="">
+    {% endif %}
+    {% if video_on_disk is false %}<p class="small muted">Il video non è più sul server (i file vengono cancellati dopo {{ retention|int }} giorni).</p>{% endif %}
+    <div class="filelinks small">
+      {% if p.video_url %}<div><a href="{{ p.video_url }}" target="_blank" rel="noopener">reel.mp4</a> <button class="link" data-copy="{{ p.video_url }}">copia URL</button></div>{% endif %}
+      {% if p.cover_url %}<div><a href="{{ p.cover_url }}" target="_blank" rel="noopener">cover.jpg</a> <button class="link" data-copy="{{ p.cover_url }}">copia URL</button></div>{% endif %}
+      {% if p.source_url %}<div><a href="{{ p.source_url }}" target="_blank" rel="noopener">clip originale su Twitch</a></div>{% endif %}
+    </div>
+  </div>
+
+  <div class="facts">
+    <section class="card">
+      <div class="who big2"><b>{{ p.creator_name }}</b> <span class="st {{ groups[p.group][1] }}">{{ groups[p.group][0] }}</span>
+        {% if p.theme %}<span class="theme t-{{ p.theme }}">{{ p.theme }}</span>{% endif %}
+        {% if p.voice %}<span class="tag">{{ p.voice }}</span>{% endif %}<span class="tag">score {{ p.score }}</span></div>
+      {% if p.headline %}<h2 class="headline2">“{{ p.headline }}”</h2>{% endif %}
+      {% if p.links %}<div class="plats">{% for l in p.links %}<a class="plat {{ l.key }}" href="{{ l.url }}" target="_blank" rel="noopener">{{ l.label }}</a>{% endfor %}</div>{% endif %}
+      {% if slot %}<p class="small">Esce {{ slot|when }} ({{ slot|ago }}).</p>{% endif %}
+      {% if p.error or p.status_reason %}<p class="small muted">Motivo: <span class="mono">{{ p.error or p.status_reason }}</span></p>{% endif %}
+      {% for k, label in (('fb_error', 'Facebook'), ('yt_error', 'YouTube')) if p[k] %}
+        <p class="small bad">{{ label }}: <span class="mono">{{ p[k] }}</span></p>{% endfor %}
+    </section>
+
+    <section class="card">
+      <h2>Cronologia</h2>
+      <ul class="timeline small">
+        <li><b>Creato</b> {{ p.created|when }}</li>
+        {% if tjob %}<li><b>Trascrizione</b> {{ tjob.status }} · {{ tjob.seconds|secs }}{% if tjob.error %} · <span class="bad mono">{{ tjob.error|truncate(200) }}</span>{% endif %}</li>{% endif %}
+        {% if rjob %}<li><b>Render</b> {{ rjob.status }} · {{ rjob.seconds|secs }}{% if rjob.result %} · layout {{ 'webcam sopra / gioco sotto' if rjob.result.layout == 'split' else 'centrato' }} · {{ rjob.result.duration }} s · {{ rjob.result.size_bytes|size }}{% endif %}{% if rjob.error %} · <span class="bad mono">{{ rjob.error|truncate(200) }}</span>{% endif %}</li>{% endif %}
+        {% if p.published %}<li><b>Instagram</b> {{ p.published|when }}{% if p.ig_permalink %} · <a href="{{ p.ig_permalink }}" target="_blank" rel="noopener">apri</a>{% endif %}</li>{% endif %}
+        {% if p.fb_published_at %}<li><b>Facebook</b> {{ p.fb_published_at|dt|when }}{% if p.fb_video_id %} · <a href="https://www.facebook.com/reel/{{ p.fb_video_id }}" target="_blank" rel="noopener">apri</a>{% endif %}</li>{% endif %}
+        {% if p.yt_video_id %}<li><b>YouTube</b> {{ p.yt_published_at|dt|when if p.yt_published_at else 'caricato (data non registrata)' }} · <a href="https://youtube.com/shorts/{{ p.yt_video_id }}" target="_blank" rel="noopener">apri</a></li>{% endif %}
+        <li class="muted">Ultimo aggiornamento {{ p.updated|ago }}</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Statistiche</h2>
+      <table class="perf">
+        <thead><tr><th></th><th>Views</th><th>Like</th><th>Altro</th></tr></thead>
+        <tbody>
+          <tr><td><span class="pdot instagram"></span>Instagram</td>{% set li = latest.get('instagram', {}) %}<td><b>{{ (p.last_views if p.last_views is not none else li.views)|n }}</b></td><td>{{ (p.last_likes if p.last_likes is not none else li.likes)|n }}</td>
+            <td class="small muted">{% if p.last_avg_watch_ms %}visione media {{ '%.1f'|format(p.last_avg_watch_ms / 1000) }} s{% endif %}{% if p.last_shares %} · {{ p.last_shares }} condivisioni{% endif %}</td></tr>
+          <tr><td><span class="pdot facebook"></span>Facebook</td>{% set lf = latest.get('facebook', {}) %}<td><b>{{ (p.fb_views if p.fb_views is not none else lf.views)|n }}</b></td><td>{{ (p.fb_likes if p.fb_likes is not none else lf.likes)|n }}</td><td></td></tr>
+          <tr><td><span class="pdot youtube"></span>YouTube</td>{% set ly = latest.get('youtube', {}) %}<td><b>{{ (p.yt_views if p.yt_views is not none else ly.views)|n }}</b></td><td>{{ (p.yt_likes if p.yt_likes is not none else ly.likes)|n }}</td><td class="small muted">{% if p.yt_comments %}{{ p.yt_comments }} commenti{% endif %}</td></tr>
+          <tr><td><span class="pdot tiktok"></span>TikTok</td><td colspan="3" class="small muted">API non ancora collegata</td></tr>
+        </tbody>
+        <tfoot><tr><td>Totale</td><td colspan="3"><b>{{ p.views|n }}</b> views</td></tr></tfoot>
+      </table>
+      {% if chart %}
+        <svg class="chart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="Views nel tempo per piattaforma">
+          <line x1="0" y1="{{ chart.height - 6 }}" x2="{{ chart.width }}" y2="{{ chart.height - 6 }}" class="axis"/>
+          {% for l in chart.lines %}<polyline points="{{ l.points }}" class="ln {{ l.platform }}"/>{% endfor %}
+        </svg>
+        <div class="small muted legend">Views cumulative · {{ chart.t0|when }} → {{ chart.t1|when }} · max {{ chart.vmax|n }}
+          {% for l in chart.lines %}<span><span class="pdot {{ l.platform }}"></span>{{ l.platform }} {{ l.last|n }}</span>{% endfor %}</div>
+      {% else %}
+        <p class="small muted">Ancora nessuna lettura dell'Analytics (gira ogni 6 ore dopo la pubblicazione).</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Testi</h2>
+      <dl class="texts small">
+        {% for k, label in (('meme_caption', 'Testo sopra la clip'), ('hook', 'Hook'), ('intro_script', 'Voce intro'), ('title', 'Titolo Twitch')) if p[k] %}
+          <dt>{{ label }}</dt><dd>{{ p[k] }}</dd>{% endfor %}
+        {% if p.caption %}<dt>Caption <button class="link" data-copy="{{ p.caption }}">copia</button></dt><dd class="pre">{{ p.caption }}</dd>{% endif %}
+        <dt>Dettagli</dt><dd>stile {{ p.style_variant or '—' }} · segmento {{ p.segment_start }}–{{ p.segment_end }} s · durata {{ p.duration_s }} s · {{ p.llm_model or '' }} {{ (p.llm_tokens|n ~ ' token') if p.llm_tokens else '' }}</dd>
+      </dl>
+      {% if p.transcript %}<details><summary class="small">Trascrizione</summary><p class="small muted pre">{{ p.transcript }}</p></details>{% endif %}
+      <p class="small muted mono">{{ p.post_key }}</p>
+    </section>
+  </div>
+</div>
+{% endblock %}

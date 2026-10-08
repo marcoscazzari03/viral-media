@@ -20,6 +20,10 @@ services:
     env_file: .env
     environment:
       WORKER_URL: http://worker:8000
+      PUBLIC_MEDIA_URL: https://${DOMAIN}
+      DATA_DIR: /srv/media
+    volumes:
+      - media_data:/srv/media:ro
     expose:
       - "8080"
 

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_post.html" import reel %}
+{% block title %}Contenuti{% endblock %}
+{% block body %}
+<section class="card">
+  <div class="chips">
+    <a class="chip {{ 'on' if not f.stato }}" href="?stato=">Tutti <b>{{ posts|length }}</b></a>
+    {% for key, (label, tone) in groups.items() if counts.get(key) %}
+      <a class="chip {{ 'on' if f.stato == key }}" href="?stato={{ key }}"><span class="st {{ tone }}">{{ label }}</span> <b>{{ counts[key] }}</b></a>
+    {% endfor %}
+  </div>
+  <form class="filters" method="get">
+    <input type="hidden" name="stato" value="{{ f.stato }}">
+    <input type="search" name="q" value="{{ f.q }}" placeholder="Cerca streamer, titolo, caption…">
+    <select name="streamer"><option value="">Tutti gli streamer</option>
+      {% for s in streamers %}<option {{ 'selected' if f.streamer == s }}>{{ s }}</option>{% endfor %}</select>
+    <select name="tema"><option value="">Tutti i temi</option>
+      {% for t in themes %}<option {{ 'selected' if f.tema == t }}>{{ t }}</option>{% endfor %}</select>
+    <select name="social"><option value="">Tutti i social</option>
+      {% for k, l in (('ig', 'Instagram'), ('fb', 'Facebook'), ('yt', 'YouTube'), ('nessuno', 'Non pubblicati')) %}
+        <option value="{{ k }}" {{ 'selected' if f.social == k }}>{{ l }}</option>{% endfor %}</select>
+    <select name="ordine">
+      {% for k, l in (('recenti', 'Più recenti'), ('views', 'Più views'), ('score', 'Punteggio')) %}
+        <option value="{{ k }}" {{ 'selected' if f.ordine == k }}>{{ l }}</option>{% endfor %}</select>
+    <button class="ghost">Filtra</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>{{ items|length }} Reel</h2>
+  <div class="list2">
+  {% for p in items %}
+    {{ reel(p, "creato " ~ (p.created|when) ~ ((" · uscito " ~ (p.published|when)) if p.published else "") ~ ((" · " ~ (p.views|n) ~ " views") if p.views else "")) }}
+  {% else %}
+    <p class="muted">Nessun Reel con questi filtri.</p>
+  {% endfor %}
+  </div>
+</section>
+{% endblock %}

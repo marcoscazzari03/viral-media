@@ -34,13 +34,15 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [ ] Rigenerare `API_TOKEN` del server e secret TikTok Sandbox (sono passati in chat).
 
 ## Da fare (8 ottobre)
-- [ ] Portale di controllo (fase 1, sola lettura): pagine Oggi e Coda su `dashboard.weborastudio.it`, login con
+- [x] Portale di controllo (fase 1, sola lettura): pagine Oggi e Coda su `dashboard.weborastudio.it`, login con
   password + Google Authenticator, dati letti dalle Data Tables via API REST di n8n (nessuna esecuzione in più).
   Da fare: record DNS, API key n8n, `app.setup` sul server. Poi fase 2 (Contenuti, Media, Factory, Workflow),
   fase 3 (Analytics, Costi), fase 4 (Impostazioni con scrittura e storico, Fonti, azioni sui Reel).
 - [ ] Quando arriva l'approvazione dell'API TikTok: aggiungere TikTok anche al portale (views e follower nella
   pagina Oggi, link del video TikTok su ogni Reel, stato della pubblicazione, eventuali guadagni), oltre che
   ad Analytics (04) e al report giornaliero (05).
+- [ ] Portale fase 2: pagine Contenuti (+ scheda Reel), Factory, Media, Workflow. Il portale legge anche la cartella
+  dei media in sola lettura. Da verificare sul server dopo `update.sh`.
 - [x] Webcam non riconosciuta sul Reel Jynxzi "pigmen" (testa bassa / girato verso il monitor: il volto non si
   vede in 3 fotogrammi su 6). Aggiunto un secondo controllo: il riquadro della webcam trovato dai suoi bordi in un
   angolo, valido solo se dentro c'è un volto grande in almeno 2 fotogrammi. Il pannello webcam ora è tagliato

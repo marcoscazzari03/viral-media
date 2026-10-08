@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Media{% endblock %}
+{% block body %}
+{% if not mounted %}
+  <div class="banner warn">La cartella dei media non è collegata al portale (volume <span class="mono">media_data</span>): aggiorna il server con <span class="mono">update.sh</span>.</div>
+{% endif %}
+<div class="grid4">
+  <section class="card kpi"><h3>File sul dominio</h3><div class="big">{{ all_size|size }}</div>
+    <div class="muted small">{% for t, v in totals.items() %}{{ v.n }} {{ t }}{{ ' · ' if not loop.last }}{% endfor %}</div></section>
+  <section class="card kpi"><h3>Disco del server</h3>
+    {% if disk %}<div class="big {{ 'bad' if disk.pct > 85 else '' }}">{{ '%.0f'|format(disk.pct) }}%</div>
+      <meter min="0" max="100" low="70" high="85" optimum="0" value="{{ disk.pct }}"></meter>
+      <div class="muted small">{{ disk.free|size }} liberi su {{ disk.total|size }}</div>
+    {% else %}<div class="big">—</div>{% endif %}</section>
+  <section class="card kpi"><h3>Conservazione</h3><div class="big">{{ retention|int }} giorni</div>
+    <div class="muted small">poi il server cancella video e cover (RETENTION_DAYS)</div></section>
+  <section class="card kpi"><h3>Indirizzo pubblico</h3><div class="state ok">media.weborastudio.it/files/</div>
+    <div class="muted small">i file sono pubblici: servono a Instagram e Facebook per scaricarli</div></section>
+</div>
+
+<section class="card">
+  <div class="chips">
+    {% for k, l in (('render', 'Reel montati'), ('transcribe', 'Trascrizioni'), ('tts', 'Voci'), ('', 'Tutto')) %}
+      <a class="chip {{ 'on' if tipo == k }}" href="?tipo={{ k }}">{{ l }}{% if k and totals.get(k) %} <b>{{ totals[k].n }}</b>{% endif %}</a>
+    {% endfor %}
+  </div>
+  <div class="media-grid">
+  {% for e in entries %}
+    {% set cover = e.files|selectattr('name', 'equalto', 'cover.jpg')|first %}
+    <div class="mcard">
+      {% if cover %}<a href="{{ (e.files|selectattr('name', 'equalto', 'reel.mp4')|first or cover).url }}" target="_blank" rel="noopener"><img src="{{ cover.url }}" alt="" loading="lazy"></a>{% endif %}
+      <div class="mbody small">
+        {% if e.post %}<a href="/contenuti/{{ e.post.post_key|urlencode }}"><b>{{ e.post.creator_name }}</b></a>{% else %}<span class="muted">{{ e.ref or 'non collegato a un Reel' }}</span>{% endif %}
+        <div class="muted">{{ e.type }} · {{ e.status }} · {{ e.when|ago }}</div>
+        {% for f in e.files %}
+          <div class="frow"><a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.name }}</a> <span class="muted">{{ f.size|size }}</span>
+            <button class="link" data-copy="{{ f.url }}">copia URL</button></div>
+        {% endfor %}
+        {% if e.deletes_at %}<div class="muted">cancellato {{ e.deletes_at|dt_ts|ago }}</div>{% endif %}
+      </div>
+    </div>
+  {% else %}
+    <p class="muted">Nessun file.</p>
+  {% endfor %}
+  </div>
+</section>
+{% endblock %}

@@ -2,6 +2,7 @@
 API calls do not count as workflow executions. Every answer is cached for a short time so that opening or
 refreshing the dashboard does not hammer n8n."""
 import asyncio
+import json
 import time
 from datetime import datetime, timezone
 
@@ -98,6 +99,21 @@ async def table_rows(name: str, since_hours: float | None = None, ttl: float = 4
             return [r for r in rows if _ts(r.get("createdAt")) >= cut]
 
     return await cached(f"rows:{name}:{since_hours}", ttl, load)
+
+
+async def table_where(name: str, column: str, value, ttl: float = 60) -> list[dict]:
+    """Rows of one table where column == value (filtered by n8n; full read + local filter if not supported)."""
+    table = config.TABLES[name]
+
+    async def load():
+        flt = json.dumps({"type": "and", "filters": [{"columnName": column, "condition": "eq", "value": value}]})
+        try:
+            return await _pages(f"/data-tables/{table}/rows", {"limit": 100, "filter": flt})
+        except N8nError:
+            rows = await _pages(f"/data-tables/{table}/rows", {"limit": 100})
+            return [r for r in rows if r.get(column) == value]
+
+    return await cached(f"where:{name}:{column}:{value}", ttl, load)
 
 
 async def workflows(ttl: float = 300) -> list[dict]:

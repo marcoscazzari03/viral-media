@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Workflow{% endblock %}
+{% block body %}
+<div class="grid4">
+  <section class="card kpi"><h3>Esecuzioni del mese</h3><div class="big">{{ month if month is not none else '—' }}<span class="muted small"> / {{ limit }}</span></div>
+    {% if month is not none %}<meter min="0" max="{{ limit }}" low="{{ limit * 0.7 }}" high="{{ limit * 0.9 }}" optimum="0" value="{{ month }}"></meter>{% endif %}
+    <div class="muted small">tutto l'account n8n (anche altri progetti)</div></section>
+  <section class="card kpi"><h3>Previsione fine mese</h3><div class="big {{ 'bad' if projection and projection > limit else '' }}">{{ projection if projection is not none else '—' }}</div>
+    <div class="muted small">al ritmo di questo mese</div></section>
+  <section class="card kpi"><h3>Errori 7 giorni</h3>{% set errs = rows|sum(attribute='err') %}<div class="big {{ 'bad' if errs else 'good' }}">{{ errs }}</div>
+    <div class="muted small">esecuzioni fallite dei workflow US VIRAL</div></section>
+  <section class="card kpi"><h3>Workflow attivi</h3><div class="big">{{ rows|selectattr('active')|list|length }}/{{ rows|length }}</div>
+    <div class="muted small">i disattivi non partono da soli</div></section>
+</div>
+
+{% for r in rows %}
+<section class="card">
+  <div class="wfhead"><span class="led {{ 'off' if not r.active else (r.execs[0].status if r.execs else 'none') }}"></span>
+    <h2><a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.name }}</a></h2>
+    <span class="muted small">{{ 'attivo' if r.active else 'disattivo' }} · {{ r.schedule }} · 7 giorni: {{ r.ok }} ok{% if r.err %}, <span class="bad">{{ r.err }} errori</span>{% endif %}</span></div>
+  {% if r.execs %}
+  <div class="execs">
+    {% for e in r.execs %}<a class="ex {{ e.status }}" href="{{ e.url }}" target="_blank" rel="noopener" title="{{ e.status }} · {{ e.started|when }}">{{ e.started|ago|replace(' fa', '') }}<small>{{ e.seconds|secs }}</small></a>{% endfor %}
+  </div>
+  {% else %}<p class="muted small">Nessuna esecuzione negli ultimi 7 giorni.</p>{% endif %}
+</section>
+{% endfor %}
+
+{% if errors_runs %}
+<section class="card">
+  <h2>Errori registrati (viral_runs, 7 giorni)</h2>
+  <ul class="issues">{% for r in errors_runs %}<li class="err"><b>{{ r.workflow }}</b> <span class="muted small">{{ r.at|ago }}</span><div class="small mono muted">{{ r.errors|truncate(300) }}</div></li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% endblock %}
