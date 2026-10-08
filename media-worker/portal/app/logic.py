@@ -469,15 +469,19 @@ def llm_costs(posts: list[dict]) -> dict:
 
 
 def earnings(rows: list[dict], start: datetime) -> dict:
-    """Facebook earnings read by the Analytics (04): each run stores the latest day Facebook reports (1-2 days
-    late, the day itself is not stored), so one value per day of reading is kept: the last one of that day."""
-    reads = sorted((parse(r.get("captured_at")), float(r["earnings_usd"])) for r in rows
-                   if (r.get("platform") or "") == "facebook" and r.get("earnings_usd") not in (None, "")
+    """Facebook earnings read by the Analytics (04). Since 8 October each read carries earnings_date (the Facebook day
+    the value refers to, 1-2 days late): one value per earnings day, the latest read wins. Older reads without it
+    are grouped by the day they were read."""
+    reads = sorted((parse(r.get("captured_at")), float(r["earnings_usd"]), str(r.get("earnings_date") or ""))
+                   for r in rows if (r.get("platform") or "") == "facebook" and r.get("earnings_usd") not in (None, "")
                    and parse(r.get("captured_at")))
-    per_day: dict[str, tuple[datetime, float]] = {}
-    for t, v in reads:
-        per_day[ny_day(t)] = (t, v)
-    days = [{"day": k, "at": t, "usd": v} for k, (t, v) in sorted(per_day.items()) if t >= start]
-    latest = reads[-1] if reads else None
-    return {"latest": latest[1] if latest else None, "latest_at": latest[0] if latest else None,
-            "days": days, "total": sum(d["usd"] for d in days)}
+    per_day: dict[str, dict] = {}
+    for t, v, day in reads:
+        key = day or ny_day(t)
+        per_day[key] = {"day": key, "at": t, "usd": v, "exact": bool(day)}
+    first = start.astimezone(NY).strftime("%Y-%m-%d")
+    days = [d for k, d in sorted(per_day.items()) if k >= first]
+    latest = max(per_day.values(), key=lambda d: d["day"]) if per_day else None
+    return {"latest": latest["usd"] if latest else None, "latest_day": latest["day"] if latest else None,
+            "latest_at": latest["at"] if latest else None, "days": days, "total": sum(d["usd"] for d in days),
+            "exact": all(d["exact"] for d in days) if days else True}

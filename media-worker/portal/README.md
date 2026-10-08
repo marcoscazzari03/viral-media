@@ -39,8 +39,8 @@ n8n REST API calls do not count as workflow executions. Answers are cached 45 s 
 - **Analytics** (7 / 14 / 30 days, New York days): views gained per day per platform (stacked bars, from the
   cumulative `viral_post_metrics` snapshots), followers over time, average views per Reel by streamer, theme,
   voice (A/B test) and New York hour, top 10 Reels, costs.
-- Earnings: real Facebook values from `viral_account_metrics` (latest day available + one value per day of reading in
-  the period); Instagram / YouTube / TikTok with the reason they have none yet. Never views × RPM estimates.
+- Earnings: real Facebook values from `viral_account_metrics`, one per Facebook day (`earnings_date`, written by 04;
+  older rows without it are grouped by the day they were read); Instagram / YouTube / TikTok with the reason they have none yet. Never views × RPM estimates.
 - Costs: Claude script calls priced from `llm_tokens` × Anthropic list prices (a min–max range, because the
   table stores input + output together), n8n executions this month, optional fixed costs from
   `MONTHLY_FIXED_COSTS` in `.env`. Voice and transcription run on the server: no API cost.

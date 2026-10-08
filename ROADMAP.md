@@ -47,6 +47,8 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
   orario, top 10, costi di Claude e n8n). Per il costo esatto di Claude: far salvare al 02 token di input e output separati.
 - [ ] Portale fase 4: Impostazioni (scrive `viral_config` con validazione e storico), Fonti (streamer: attiva,
   priorità, sottotitoli) e azioni sui Reel (metti per primo, scarta, chiudi riga bloccata). Da provare sul server.
+- [ ] Guadagni Facebook giorno per giorno: colonna `earnings_date` in `viral_account_metrics`, scritta dal 04 (bozza
+  testata, da pubblicare con approvazione); il portale la usa per Analytics → Guadagni.
 - [ ] Disco: `update.sh` ora cancella le immagini Docker vecchie; avviso nel portale sopra l'80%. Conservazione dei
   file portata a 14 giorni (`RETENTION_DAYS=14` nel `.env` del server); dopo qualche settimana valutare 30.
 - [x] Webcam non riconosciuta sul Reel Jynxzi "pigmen" (testa bassa / girato verso il monitor: il volto non si

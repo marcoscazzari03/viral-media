@@ -1288,7 +1288,8 @@
             "captured_at": "={{ $now.toISO() }}",
             "platform": "facebook",
             "earnings_usd": "={{ (($json.data?.[0]?.values ?? []).slice(-1)[0]?.value?.microAmount ?? 0) / 1e6 }}",
-            "run_id": "={{ $('Init Analytics').first().json.run_id }}"
+            "run_id": "={{ $('Init Analytics').first().json.run_id }}",
+            "earnings_date": "={{ ($json.data?.[0]?.values ?? []).slice(-1)[0]?.end_time ? (DateTime.fromISO(String(($json.data?.[0]?.values ?? []).slice(-1)[0].end_time).replace(/([+-]\\d{2})(\\d{2})$/, '$1:$2')).minus({ seconds: 1 }).setZone('America/Los_Angeles').toISODate() ?? '') : '' }}"
           }
         },
         "options": {}
