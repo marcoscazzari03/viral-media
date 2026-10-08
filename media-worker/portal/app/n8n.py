@@ -83,7 +83,7 @@ def _ts(value) -> float:
         return 0.0
 
 
-async def table_rows(name: str, since_hours: float | None = None, ttl: float = 45) -> list[dict]:
+async def table_rows(name: str, since_hours: float | None = None, ttl: float = 45, max_pages: int = 50) -> list[dict]:
     """Rows of one project table. since_hours: only rows created in the last N hours (newest first, early stop)."""
     table = config.TABLES[name]
 
@@ -93,9 +93,9 @@ async def table_rows(name: str, since_hours: float | None = None, ttl: float = 4
         cut = time.time() - since_hours * 3600
         try:
             return await _pages(f"/data-tables/{table}/rows", {"limit": 100, "sortBy": "createdAt:desc"},
-                                stop=lambda r: _ts(r.get("createdAt")) < cut)
+                                stop=lambda r: _ts(r.get("createdAt")) < cut, max_pages=max_pages)
         except N8nError:  # sortBy not supported by this n8n version: full read, filter here
-            rows = await _pages(f"/data-tables/{table}/rows", {"limit": 100})
+            rows = await _pages(f"/data-tables/{table}/rows", {"limit": 100}, max_pages=max_pages)
             return [r for r in rows if _ts(r.get("createdAt")) >= cut]
 
     return await cached(f"rows:{name}:{since_hours}", ttl, load)

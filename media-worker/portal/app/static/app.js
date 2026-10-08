@@ -25,6 +25,16 @@
   });
   let dirty = false;  // no auto-refresh while a settings form has unsaved edits
   document.addEventListener('input', e => { if (e.target.closest('.settings')) dirty = true; });
+  // chart tooltips: any element with data-tip
+  const tipEl = () => document.querySelector('.tip');
+  document.addEventListener('pointermove', e => {
+    const t = tipEl(); if (!t) return;
+    const src = e.target.closest('[data-tip]');
+    if (!src) { t.hidden = true; return; }
+    t.textContent = src.dataset.tip; t.hidden = false;
+    const x = Math.min(e.clientX + 14, window.innerWidth - t.offsetWidth - 8);
+    t.style.left = x + 'px'; t.style.top = (e.clientY + 14) + 'px';
+  });
   setInterval(() => { tick(); upd(); }, 15000);
   setInterval(() => { if (document.visibilityState === 'visible' && !dirty && !['/login', '/impostazioni'].includes(location.pathname)) location.reload(); }, 120000);
   tick();

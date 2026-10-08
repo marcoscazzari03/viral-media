@@ -211,9 +211,8 @@ def factory_state(now: datetime, cfg: dict, posts: list[dict], last_run: dict | 
 
 
 # ------------------------------------------------------------------ Performance (same maths as the Daily Report)
-def performance(now: datetime, posts: list[dict], snaps: list[dict], followers: list[dict]) -> dict:
-    by_key = {p["post_key"]: p for p in posts}
-    now_s = now.timestamp()
+def snapshot_series(snaps: list[dict]) -> dict[tuple[str, str], list[tuple[float, float]]]:
+    """(platform, post_key) -> [(timestamp, cumulative views)] from the Analytics snapshots."""
     series: dict[tuple[str, str], list[tuple[float, float]]] = {}
     for s in snaps:
         t = parse(s.get("captured_at"))
@@ -221,16 +220,28 @@ def performance(now: datetime, posts: list[dict], snaps: list[dict], followers: 
             continue
         key = (s.get("platform") or "instagram", s["post_key"])
         series.setdefault(key, []).append((t.timestamp(), float(s["views"] or 0)))
+    return series
 
+
+def make_views_at(by_key: dict):
     def views_at(platform: str, post_key: str, pts: list, t: float) -> float:
-        before = [v for ts, v in pts if ts <= t]
+        """Total views of one Reel on one platform at time t (latest snapshot <= t)."""
+        before = [(ts, v) for ts, v in pts if ts <= t]
         if before:
-            return max(((ts, v) for ts, v in pts if ts <= t))[1]
+            return max(before)[1]
         p = by_key.get(post_key, {})
         out = parse(p.get("yt_published_at") if platform == "youtube" else None) or p.get("published")
         if out and out.timestamp() > t:
             return 0.0  # not out yet at t
         return min(pts)[1]  # out but not measured yet: first snapshot
+    return views_at
+
+
+def performance(now: datetime, posts: list[dict], snaps: list[dict], followers: list[dict]) -> dict:
+    by_key = {p["post_key"]: p for p in posts}
+    now_s = now.timestamp()
+    series = snapshot_series(snaps)
+    views_at = make_views_at(by_key)
 
     gains: dict[str, dict] = {}
     per_post: dict[str, float] = {}
@@ -363,3 +374,95 @@ WORKFLOW_SCHEDULES = {  # by the "NN -" prefix of the workflow name (New York ti
     "03": "11, 12, 15, 16, 19, 20 (:05)", "04": "ogni 6 ore (:25)", "05": "ogni giorno alle 20:20",
     "06": "12, 16, 20 (:20)", "07": "12, 16, 20 (:35)",
 }
+
+
+# ------------------------------------------------------------------ Analytics (phase 3)
+PLATFORMS = [("instagram", "Instagram"), ("facebook", "Facebook"), ("youtube", "YouTube"), ("tiktok", "TikTok")]
+# USD per million tokens (input, output), Anthropic API list prices
+LLM_PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-opus-5": (5.0, 25.0), "claude-sonnet-5-5": (2.0, 10.0),
+              "claude-sonnet-5": (2.0, 10.0), "claude-haiku-5-5": (0.10, 0.50), "claude-haiku-4-5": (1.0, 5.0),
+              "claude-fable-5-1": (10.0, 50.0)}
+
+
+def ny_midnight(d: datetime) -> datetime:
+    x = d.astimezone(NY)
+    return datetime(x.year, x.month, x.day, tzinfo=NY)
+
+
+def daily_views(now: datetime, posts: list[dict], snaps: list[dict], days: int) -> list[dict]:
+    """Views gained each New York day per platform (difference of the cumulative snapshots at the day's edges)."""
+    by_key = {p["post_key"]: p for p in posts}
+    series = snapshot_series(snaps)
+    views_at = make_views_at(by_key)
+    first = ny_midnight(now) - timedelta(days=days - 1)
+    out = []
+    for i in range(days):
+        start = first + timedelta(days=i)
+        start = datetime(start.year, start.month, start.day, tzinfo=NY)  # DST-safe midnight
+        end = min(start + timedelta(days=1), now)
+        row = {"day": start, "total": 0.0, **{k: 0.0 for k, _ in PLATFORMS}}
+        for (platform, post_key), pts in series.items():
+            pts.sort()
+            if pts[-1][0] < start.timestamp():  # Reel no longer tracked: unknown, not zero
+                continue
+            gain = max(0.0, views_at(platform, post_key, pts, end.timestamp())
+                       - views_at(platform, post_key, pts, start.timestamp()))
+            row[platform] = row.get(platform, 0.0) + gain
+            row["total"] += gain
+        out.append(row)
+    return out
+
+
+def followers_series(rows: list[dict]) -> dict[str, list[tuple[datetime, int]]]:
+    out: dict[str, list[tuple[datetime, int]]] = {}
+    for r in rows:
+        t = parse(r.get("captured_at"))
+        if t and r.get("followers_count") not in (None, ""):
+            out.setdefault(r.get("platform") or "instagram", []).append((t, int(float(r["followers_count"]))))
+    for v in out.values():
+        v.sort()
+    return out
+
+
+def compare(posts: list[dict], key) -> list[dict]:
+    """Published Reels grouped by key(p): count, total and average views (all platforms), best Reel."""
+    groups: dict[str, list[dict]] = {}
+    for p in posts:
+        k = key(p)
+        if k:
+            groups.setdefault(k, []).append(p)
+    rows = []
+    for k, items in groups.items():
+        views = [total_views(p) for p in items]
+        rows.append({"label": k, "n": len(items), "total": sum(views), "avg": sum(views) / len(items),
+                     "best": max(items, key=total_views)})
+    rows.sort(key=lambda r: -r["avg"])
+    top = max((r["avg"] for r in rows), default=0) or 1
+    for r in rows:
+        r["pct"] = r["avg"] / top * 100
+    return rows
+
+
+def llm_costs(posts: list[dict]) -> dict:
+    """Claude cost of the Reels' script calls. viral_posts.llm_tokens is input + output together, so the cost is a
+    range: all tokens priced as input (minimum) to all as output (maximum)."""
+    by_model: dict[str, dict] = {}
+    for p in posts:
+        tok = float(p.get("llm_tokens") or 0)
+        if not tok:
+            continue
+        m = str(p.get("llm_model") or "?")
+        g = by_model.setdefault(m, {"model": m, "calls": 0, "tokens": 0.0})
+        g["calls"] += 1
+        g["tokens"] += tok
+    lo = hi = 0.0
+    for g in by_model.values():
+        pin, pout = LLM_PRICES.get(g["model"], (None, None))
+        g["known"] = pin is not None
+        if pin is not None:
+            g["lo"], g["hi"] = g["tokens"] / 1e6 * pin, g["tokens"] / 1e6 * pout
+            lo += g["lo"]
+            hi += g["hi"]
+    calls = sum(g["calls"] for g in by_model.values())
+    return {"models": sorted(by_model.values(), key=lambda g: -g["tokens"]), "lo": lo, "hi": hi, "calls": calls,
+            "per_reel": ((lo / calls, hi / calls) if calls else None)}

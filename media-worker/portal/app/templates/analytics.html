@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Analytics{% endblock %}
+{% macro cmp(title, rows, note="") %}
+<section class="card">
+  <h2>{{ title }}</h2>
+  {% if rows %}
+  <table class="tbl small cmp">
+    <thead><tr><th></th><th>Reel</th><th>Views medie</th><th></th></tr></thead>
+    <tbody>{% for r in rows %}
+      <tr><td><b>{{ r.label }}</b></td><td>{{ r.n }}</td><td>{{ r.avg|n }}</td>
+        <td class="barcell"><svg viewBox="0 0 100 10" preserveAspectRatio="none" class="hbar" aria-hidden="true"><rect x="0" y="1" width="{{ '%.1f'|format([r.pct, 0.8]|max) }}" height="8" rx="1.5"/></svg></td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% if note %}<p class="small muted">{{ note }}</p>{% endif %}
+  {% else %}<p class="muted small">Nessun Reel pubblicato nel periodo.</p>{% endif %}
+</section>
+{% endmacro %}
+{% block body %}
+<div class="chips">
+  {% for g in (7, 14, 30) %}<a class="chip {{ 'on' if days == g }}" href="?giorni={{ g }}">{{ g }} giorni</a>{% endfor %}
+</div>
+
+<div class="grid4">
+  <section class="card kpi"><h3>Views nel periodo</h3><div class="big">{{ total|n }}</div>
+    <div class="muted small">tutti i social · ultimi {{ days }} giorni (New York)</div></section>
+  <section class="card kpi"><h3>Reel pubblicati</h3><div class="big">{{ published_n }}</div>
+    <div class="muted small">{{ made_n }} prodotti dalla Factory</div></section>
+  <section class="card kpi"><h3>Views medie per Reel</h3><div class="big">{{ avg|n }}</div>
+    <div class="muted small">totale attuale su IG + FB + YT</div></section>
+  <section class="card kpi"><h3>Follower</h3>
+    <div class="fl">{% for k, name in names.items() if fnow.get(k) %}<div><span class="pdot {{ k }}"></span>{{ name }} <b>{{ fnow[k][0]|n }}</b>
+      <span class="small {{ 'good' if fnow[k][1] > 0 else 'muted' }}">{{ '%+d'|format(fnow[k][1]) }}</span></div>{% else %}<div class="muted small">nessun dato</div>{% endfor %}</div></section>
+</div>
+
+<section class="card">
+  <h2>Views al giorno per social</h2>
+  <div class="legend">{% for k, name in keys %}<span><span class="pdot {{ k }}"></span>{{ name }}</span>{% endfor %}</div>
+  {% if bars.empty %}<p class="muted small">Ancora nessuna lettura dell'Analytics nel periodo.</p>{% else %}
+  <div class="chartwrap"><svg class="chart2" viewBox="0 0 {{ bars.w }} {{ bars.h }}" role="img" aria-label="Views al giorno per social, ultimi {{ days }} giorni">
+    {% for t in bars.ticks %}<line x1="{{ bars.left }}" x2="{{ bars.right }}" y1="{{ t.y }}" y2="{{ t.y }}" class="grid{{ ' base' if loop.first }}"/>
+      <text x="{{ bars.left - 6 }}" y="{{ t.y + 4 }}" class="tick" text-anchor="end">{{ t.label }}</text>{% endfor %}
+    {% for b in bars.bars %}
+      <g class="bar" data-tip="{{ b.tip }}">
+        <rect class="hit" x="{{ b.hit_x }}" y="0" width="{{ b.hit_w }}" height="{{ bars.base }}"/>
+        {% for s in b.segs %}<path d="{{ s.d }}" class="seg {{ s.key }}"/>{% endfor %}
+      </g>
+      {% if b.label %}<text x="{{ b.lx }}" y="{{ bars.h - 6 }}" class="tick" text-anchor="middle">{{ b.label }}</text>{% endif %}
+    {% endfor %}
+  </svg></div>
+  {% endif %}
+  <details><summary class="small">Tabella</summary>
+    <table class="tbl small"><thead><tr><th>Giorno</th>{% for k, name in keys %}<th>{{ name }}</th>{% endfor %}<th>Totale</th></tr></thead>
+      <tbody>{% for r in daily|reverse %}<tr><td>{{ r.day.strftime('%d/%m') }}</td>{% for k, _ in keys %}<td>{{ r[k]|n }}</td>{% endfor %}<td><b>{{ r.total|n }}</b></td></tr>{% endfor %}</tbody></table>
+  </details>
+  <p class="small muted">Calcolate dalle letture dell'Analytics (ogni 6 ore): ogni Reel è seguito per {{ track_days|int }} giorni dopo l'uscita, quindi le views dei Reel più vecchi non vengono più contate.</p>
+</section>
+
+<section class="card">
+  <h2>Follower nel tempo</h2>
+  {% if fchart.empty %}<p class="muted small">Nessun dato sui follower nel periodo.</p>{% else %}
+  <div class="legend">{% for l in fchart.lines %}<span><span class="pdot {{ l.key }}"></span>{{ l.name }} {{ l.last[3]|n }}</span>{% endfor %}</div>
+  <div class="chartwrap"><svg class="chart2" viewBox="0 0 {{ fchart.w }} {{ fchart.h }}" role="img" aria-label="Follower nel tempo per social">
+    {% for t in fchart.ticks %}<line x1="{{ fchart.left }}" x2="{{ fchart.right }}" y1="{{ t.y }}" y2="{{ t.y }}" class="grid{{ ' base' if loop.first }}"/>
+      <text x="{{ fchart.left - 6 }}" y="{{ t.y + 4 }}" class="tick" text-anchor="end">{{ t.label }}</text>{% endfor %}
+    {% for l in fchart.lines %}<polyline points="{{ l.points }}" class="ln2 {{ l.key }}"/>
+      {% for p in l.dots %}<circle cx="{{ p.x }}" cy="{{ p.y }}" r="9" class="hitdot" data-tip="{{ p.tip }}"/>{% endfor %}
+      <circle cx="{{ l.last[0] }}" cy="{{ l.last[1] }}" r="4" class="enddot {{ l.key }}"/>{% endfor %}
+  </svg></div>
+  {% endif %}
+</section>
+
+<div class="cols">
+  <div>
+    {{ cmp("Per streamer", by_streamer) }}
+    {{ cmp("Per tema grafico", by_theme) }}
+  </div>
+  <div>
+    {{ cmp("Voce AI sì / no (test A/B)", by_voice, "Con pochi Reel per gruppo la differenza può essere caso: servono almeno 8-10 Reel per lato.") }}
+    {{ cmp("Per orario di uscita", by_hour) }}
+  </div>
+</div>
+
+<section class="card">
+  <h2>Top 10 del periodo</h2>
+  <table class="tbl small">
+    <thead><tr><th>Reel</th><th>Uscito</th><th>IG</th><th>FB</th><th>YT</th><th>Totale</th></tr></thead>
+    <tbody>{% for p in top %}
+      <tr><td><a href="/contenuti/{{ p.post_key|urlencode }}"><b>{{ p.creator_name }}</b></a> · {{ p.headline|truncate(50) }}</td>
+        <td>{{ p.published|when }}</td><td>{{ p.last_views|n }}</td><td>{{ p.fb_views|n }}</td><td>{{ p.yt_views|n }}</td><td><b>{{ p.views|n }}</b></td></tr>
+    {% else %}<tr><td colspan="6" class="muted">Nessun Reel pubblicato nel periodo.</td></tr>{% endfor %}</tbody>
+  </table>
+</section>
+
+<section class="card" id="costi">
+  <h2>Costi</h2>
+  <div class="grid4 inner">
+    <div><h3>Claude (script dei Reel)</h3>
+      <div class="big2"><b>${{ '%.2f'|format(costs.lo) }} – ${{ '%.2f'|format(costs.hi) }}</b></div>
+      <div class="muted small">{{ costs.calls }} chiamate negli ultimi {{ days }} giorni{% if costs.per_reel %} · ${{ '%.3f'|format(costs.per_reel[0]) }}–{{ '%.3f'|format(costs.per_reel[1]) }} a Reel{% endif %}</div></div>
+    <div><h3>Esecuzioni n8n (mese)</h3><div class="big2"><b>{{ month_execs if month_execs is not none else '—' }}</b> / {{ month_limit }}</div>
+      <div class="muted small">incluse nel piano n8n</div></div>
+    <div><h3>Voce e trascrizione</h3><div class="big2"><b>$0</b></div><div class="muted small">girano sul tuo server (Kokoro, Whisper)</div></div>
+    <div><h3>Costi fissi al mese</h3>
+      {% for name, v in fixed %}<div class="small">{{ name }}: <b>€{{ '%.2f'|format(v) }}</b></div>{% else %}
+      <div class="muted small">Non impostati: aggiungi nel .env <span class="mono">MONTHLY_FIXED_COSTS="Server Hetzner=5.49;n8n Cloud=24"</span></div>{% endfor %}</div>
+  </div>
+  {% if costs.models %}
+  <table class="tbl small"><thead><tr><th>Modello</th><th>Chiamate</th><th>Token</th><th>Costo</th></tr></thead>
+    <tbody>{% for m in costs.models %}<tr><td class="mono">{{ m.model }}</td><td>{{ m.calls }}</td><td>{{ m.tokens|n }}</td>
+      <td>{% if m.known %}${{ '%.3f'|format(m.lo) }} – ${{ '%.3f'|format(m.hi) }}{% else %}<span class="muted">prezzo sconosciuto</span>{% endif %}</td></tr>{% endfor %}</tbody></table>
+  {% endif %}
+  <p class="small muted">La tabella salva i token di input e output insieme, quindi il costo è un intervallo: minimo se fossero tutti di input, massimo se fossero tutti di output (prezzi di listino Anthropic in $ per milione di token).</p>
+</section>
+<div class="tip" hidden></div>
+{% endblock %}

@@ -35,3 +35,15 @@ def problems() -> list[str]:
     if not N8N_BASE_URL or not N8N_API_KEY:
         out.append("N8N_BASE_URL / N8N_API_KEY mancanti: i dati non possono essere letti")
     return out
+
+
+def fixed_costs() -> list[tuple[str, float]]:
+    """MONTHLY_FIXED_COSTS="Server Hetzner=5.49;n8n Cloud=24" (EUR per month) for the Costi section."""
+    out = []
+    for part in os.environ.get("MONTHLY_FIXED_COSTS", "").split(";"):
+        name, _, value = part.partition("=")
+        try:
+            out.append((name.strip(), float(value.replace(",", "."))))
+        except ValueError:
+            continue
+    return [x for x in out if x[0]]

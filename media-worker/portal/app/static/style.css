@@ -1,7 +1,8 @@
 :root{
   --bg:#0e0e12;--card:#17171d;--line:#2a2a33;--fg:#f1f1f4;--muted:#9696a4;--accent:#fe2c55;
   --good:#2fca74;--bad:#ff5d5d;--warn:#f5b02e;--idle:#7b8cff;
-  --ig:#e1306c;--fb:#1877f2;--yt:#ff0000;--tt:#25f4ee;
+  /* platform colors: validated together for color-blind safety on the dark card (dataviz validator, all pairs) */
+  --ig:#d55181;--fb:#3987e5;--yt:#c98500;--tt:#199e70;
   color-scheme:dark;
 }
 *{box-sizing:border-box}
@@ -59,7 +60,7 @@ button.link{background:none;border:0;color:var(--muted);text-decoration:underlin
 .t-yellow{--c:#FFD221}.t-red{--c:#FF4545}.t-blue{--c:#3DA9FF}.t-green{--c:#3DFF8B}.t-purple{--c:#B45CFF}
 .plats{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
 .plat{color:#fff;border:0;font-weight:600;padding:2px 8px}
-.plat.ig{background:var(--ig)}.plat.fb{background:var(--fb)}.plat.yt{background:var(--yt)}
+.plat.ig{background:var(--ig)}.plat.fb{background:var(--fb)}.plat.yt{background:var(--yt);color:#141414}
 .meta{margin:-4px 0 6px 70px}
 .slot{border-top:1px solid var(--line);padding:10px 0}
 .slot:first-of-type{border-top:0;padding-top:0}
@@ -165,3 +166,31 @@ table.tbl{width:100%;border-collapse:collapse}
 .sw{width:12px;height:12px;border-radius:50%;background:var(--c);display:inline-block}
 form button.primary{margin-top:12px}
 @media (max-width:1000px){.settings{grid-template-columns:minmax(0,1fr)}}
+
+/* analytics charts */
+svg.chart2{width:100%;height:auto;display:block;margin-top:6px}
+.chart2 .grid{stroke:var(--line);stroke-width:1}
+.chart2 .grid.base{stroke:#4a4a55}
+.chart2 .tick{fill:var(--muted);font-size:9.5px}
+.chart2 .hit{fill:transparent}
+.chart2 .bar:hover .hit{fill:rgba(255,255,255,.05)}
+.chart2 .seg{fill:#777}
+.chart2 .seg.instagram,.enddot.instagram{fill:var(--ig)}.chart2 .seg.facebook,.enddot.facebook{fill:var(--fb)}
+.chart2 .seg.youtube,.enddot.youtube{fill:var(--yt)}.chart2 .seg.tiktok,.enddot.tiktok{fill:var(--tt)}
+.ln2{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round;stroke:#888}
+.ln2.instagram{stroke:var(--ig)}.ln2.facebook{stroke:var(--fb)}.ln2.youtube{stroke:var(--yt)}.ln2.tiktok{stroke:var(--tt)}
+.enddot{stroke:var(--card);stroke-width:2}
+.hitdot{fill:transparent}
+.legend span{display:inline-flex;align-items:center}
+.tip{position:fixed;z-index:20;pointer-events:none;background:#000;border:1px solid var(--line);color:var(--fg);
+  font-size:12.5px;padding:6px 9px;border-radius:8px;max-width:280px;box-shadow:0 4px 16px rgba(0,0,0,.4)}
+.cmp td:first-child{max-width:160px}
+.barcell{width:42%}
+.hbar{width:100%;height:12px;display:block}
+.hbar rect{fill:var(--fb)}
+.fl{display:grid;gap:3px;font-size:14px}
+.grid4.inner{margin-bottom:12px}
+.grid4.inner h3{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:0 0 6px}
+.chartwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.cmp td:first-child{overflow-wrap:normal;word-break:normal}
+@media (max-width:640px){.chartwrap svg.chart2{min-width:560px}}

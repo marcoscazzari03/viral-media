@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import audit, auth, config, logic, media, n8n, settings_spec
+from . import audit, auth, charts, config, logic, media, n8n, settings_spec
 
 BASE = Path(__file__).parent
 app = FastAPI(title="US VIRAL portal", docs_url=None, redoc_url=None, openapi_url=None)
@@ -459,3 +459,48 @@ async def settings_save(request: Request, group: str):
         changed += 1
     n8n.clear_cache()
     return RedirectResponse(f"/impostazioni?ok={group}&n={changed}#{group}", status_code=303)
+
+
+# ------------------------------------------------------------------ phase 3: Analytics + Costi
+@app.get("/analytics", response_class=HTMLResponse)
+async def analytics(request: Request, giorni: int = 14):
+    days = giorni if giorni in (7, 14, 30) else 14
+    d = await load(need_perf=False)
+    now, posts = d["now"], d["posts"]
+    hours = days * 24 + 30
+    try:
+        snaps, foll = await asyncio.gather(n8n.table_rows("post_metrics", since_hours=hours, ttl=600, max_pages=200),
+                                           n8n.table_rows("account_metrics", since_hours=hours, ttl=600))
+    except n8n.N8nError as e:
+        snaps, foll, d["errors"] = [], [], d["errors"] + [str(e)]
+    daily = logic.daily_views(now, posts, snaps, days)
+    names = dict(logic.PLATFORMS)
+    keys = [(k, n) for k, n in logic.PLATFORMS if any(r.get(k) for r in daily)] or logic.PLATFORMS[:3]
+    bars = charts.stacked_bars(daily, keys, lambda r: f"{r['day']:%d/%m}")
+    start = logic.ny_midnight(now) - timedelta(days=days - 1)
+    fser = logic.followers_series(foll)
+    fchart = charts.lines(fser, names, start, now)
+    fnow = {k: (v[-1][1], v[-1][1] - next((n for t, n in v if t >= start), v[0][1])) for k, v in fser.items() if v}
+    window = [p for p in posts if p["status"] == "PUBLISHED" and p["published"] and p["published"] >= start]
+    made = [p for p in posts if p["created"] and p["created"] >= start and not p["test"]]
+    for p in window:
+        p["views"] = logic.total_views(p)
+    hour_of = lambda p: f"{p['published'].astimezone(logic.NY):%H}:00 NY"  # noqa: E731
+    total = sum(r["total"] for r in daily)
+    month_execs = None
+    try:
+        month_execs = await n8n.executions_this_month()
+    except n8n.N8nError:
+        pass
+    return page(request, "analytics.html", {
+        **d, "days": days, "daily": daily, "bars": bars, "keys": keys, "fchart": fchart, "fnow": fnow,
+        "names": names, "total": total, "published_n": len(window), "made_n": len(made),
+        "avg": (sum(p["views"] for p in window) / len(window)) if window else None,
+        "by_streamer": logic.compare(window, lambda p: p.get("creator_name")),
+        "by_theme": logic.compare(window, lambda p: p["theme"] or "prima dei temi"),
+        "by_voice": logic.compare(window, lambda p: p["voice"] or "?"),
+        "by_hour": logic.compare(window, hour_of),
+        "top": sorted(window, key=lambda p: -p["views"])[:10],
+        "costs": logic.llm_costs(made), "month_execs": month_execs, "month_limit": config.N8N_MONTHLY_EXECUTIONS,
+        "fixed": config.fixed_costs(), "track_days": logic.num(d["cfg"], "analytics_track_days") or 7,
+    })

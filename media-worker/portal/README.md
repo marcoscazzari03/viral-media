@@ -35,6 +35,16 @@ n8n REST API calls do not count as workflow executions. Answers are cached 45 s 
 - **Workflow**: each US VIRAL workflow with schedule, last executions (link to n8n), errors in 7 days, executions of
   the month and end-of-month projection against the plan limit, errors logged in `viral_runs`.
 
+## Analytics (phase 3, read-only)
+- **Analytics** (7 / 14 / 30 days, New York days): views gained per day per platform (stacked bars, from the
+  cumulative `viral_post_metrics` snapshots), followers over time, average views per Reel by streamer, theme,
+  voice (A/B test) and New York hour, top 10 Reels, costs.
+- Costs: Claude script calls priced from `llm_tokens` × Anthropic list prices (a min–max range, because the
+  table stores input + output together), n8n executions this month, optional fixed costs from
+  `MONTHLY_FIXED_COSTS` in `.env`. Voice and transcription run on the server: no API cost.
+- Charts are server-side SVG with hover tooltips; platform colors were validated together for color-blind
+  safety on the dark surface.
+
 ## Settings (phase 4, writes)
 - **Impostazioni** edits the `viral_config` values the workflows read at every run: publishing (on/off, Reels per
   day, slots limited to the hours the 03 trigger runs, minimum gap, STALE threshold), Factory caps, theme rotation

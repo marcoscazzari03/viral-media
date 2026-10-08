@@ -43,6 +43,8 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
   ad Analytics (04) e al report giornaliero (05).
 - [ ] Portale fase 2: pagine Contenuti (+ scheda Reel), Factory, Media, Workflow. Il portale legge anche la cartella
   dei media in sola lettura. Da verificare sul server dopo `update.sh`.
+- [ ] Portale fase 3: pagina Analytics (views al giorno per social, follower, confronti per streamer / tema / voce /
+  orario, top 10, costi di Claude e n8n). Per il costo esatto di Claude: far salvare al 02 token di input e output separati.
 - [ ] Portale fase 4a: pagina Impostazioni (scrive `viral_config` via API, con validazione e storico). Poi 4b: Fonti
   (streamer) e azioni sui Reel (pubblica al prossimo slot, scarta, pulisci righe bloccate).
 - [ ] Disco: `update.sh` ora cancella le immagini Docker vecchie; avviso nel portale sopra l'80%. Conservazione dei
