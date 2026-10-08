@@ -52,6 +52,12 @@ n8n REST API calls do not count as workflow executions. Answers are cached 45 s 
 - Each group is validated as a whole before anything is written; writes use the Data Tables upsert endpoint on
   `key` and are checked against the returned row. Every change (old -> new, IP, ok / error) is kept in SQLite on
   the `portal_data` volume (the portal's only own data) and listed at the bottom of the page.
+- **Fonti** lists `viral_sources` with Reels produced / published, average views and last Reel per source;
+  each row saves active, priority (1-5) and has_burned_captions (update on `source_key`).
+- **Actions on a Reel** (Reel page, with confirmation): *Metti per primo* raises `trend_score` one point above the
+  best READY Reel, so the Publisher picks it at the next slot within its usual cap and gap; *Scarta* sets a READY
+  Reel to SKIPPED; *Chiudi riga bloccata* sets a row stuck for 2+ hours to FAILED. Nothing is ever deleted.
+- All writes are recorded in the history (Impostazioni page).
 - The API key needs permission to update Data Table rows.
 
 ## Security

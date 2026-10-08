@@ -19,6 +19,7 @@ TABLES = {
     "post_metrics": os.environ.get("TABLE_POST_METRICS", "9TnEU4uXAH0hvr1f"),
     "account_metrics": os.environ.get("TABLE_ACCOUNT_METRICS", "vqjHMIflVZuF6DRf"),
     "candidates": os.environ.get("TABLE_CANDIDATES", "XPwUBovmuqyubatZ"),
+    "sources": os.environ.get("TABLE_SOURCES", "ULvhVxUCOHh4vjmO"),
 }
 # Only workflows whose name contains this are ever shown (the n8n instance has other projects too)
 WORKFLOW_MARK = os.environ.get("WORKFLOW_MARK", "US VIRAL |")

@@ -290,7 +290,7 @@ async def contents(request: Request, stato: str = "", streamer: str = "", tema: 
 
 
 @app.get("/contenuti/{post_key}", response_class=HTMLResponse)
-async def content(request: Request, post_key: str):
+async def content(request: Request, post_key: str, ok: str = "", err: str = ""):
     d = await load(need_perf=False)
     now, sched = d["now"], scheduled_keys(d)
     p = next((x for x in d["posts"] if x["post_key"] == post_key), None)
@@ -311,7 +311,9 @@ async def content(request: Request, post_key: str):
         **d, "p": p, "slot": slot, "chart": logic.sparks(snaps), "latest": latest,
         "tjob": media.job(p.get("transcribe_job_id")), "rjob": media.job(p.get("render_job_id")),
         "video_on_disk": media.file_state(p.get("video_url")), "cover_on_disk": media.file_state(p.get("cover_url")),
-        "retention": media.RETENTION_DAYS,
+        "retention": media.RETENTION_DAYS, "ok": ok, "err": err,
+        "can_first": p["status"] == "READY" and not p["test"], "can_skip": p["status"] == "READY",
+        "can_close": p["status"] in logic.IN_PROGRESS and logic.stuck(p, now),
     })
 
 
@@ -504,3 +506,123 @@ async def analytics(request: Request, giorni: int = 14):
         "costs": logic.llm_costs(made), "month_execs": month_execs, "month_limit": config.N8N_MONTHLY_EXECUTIONS,
         "fixed": config.fixed_costs(), "track_days": logic.num(d["cfg"], "analytics_track_days") or 7,
     })
+
+
+# ------------------------------------------------------------------ phase 4b: Fonti (streamers) + actions on Reels
+@app.get("/fonti", response_class=HTMLResponse)
+async def sources_page(request: Request, ok: str = "", err: str = ""):
+    d = await load(need_perf=False)
+    try:
+        sources = await n8n.table_rows("sources", ttl=60)
+    except n8n.N8nError as e:
+        sources, d["errors"] = [], d["errors"] + [str(e)]
+    stats: dict[str, dict] = {}
+    for p in d["posts"]:
+        if p["test"] or not p.get("source_key"):
+            continue
+        s = stats.setdefault(p["source_key"], {"made": 0, "pub": 0, "views": 0, "last": None})
+        s["made"] += 1
+        if p["status"] == "PUBLISHED":
+            s["pub"] += 1
+            s["views"] += logic.total_views(p)
+        if p["created"] and (s["last"] is None or p["created"] > s["last"]):
+            s["last"] = p["created"]
+    rows = []
+    for src in sources:
+        st = stats.get(src.get("source_key"), {"made": 0, "pub": 0, "views": 0, "last": None})
+        rows.append({**src, **st, "avg": st["views"] / st["pub"] if st["pub"] else None})
+    rows.sort(key=lambda r: (r.get("platform") != "twitch", not r.get("active"), -(r.get("avg") or -1),
+                             str(r.get("name") or r.get("source_key")).lower()))
+    return page(request, "sources.html", {**d, "sources": rows, "ok": ok, "err": err,
+                                          "factory_platforms": str(d["cfg"].get("factory_platforms") or "twitch")})
+
+
+@app.post("/fonti/{source_key:path}")
+async def source_save(request: Request, source_key: str):
+    form = await request.form()
+    ip = request.client.host if request.client else "?"
+    back = f"/fonti?{{}}#s-{quote(source_key)}"
+    try:
+        sources = await n8n.table_rows("sources", ttl=0)
+    except n8n.N8nError as e:
+        return RedirectResponse(back.format("err=" + quote(str(e))), status_code=303)
+    matches = [s for s in sources if s.get("source_key") == source_key]
+    if len(matches) != 1:
+        return RedirectResponse(back.format("err=" + quote("fonte non trovata")), status_code=303)
+    cur = matches[0]
+    try:
+        priority = int(form.get("priority", ""))
+    except ValueError:
+        priority = 0
+    if not 1 <= priority <= 5:
+        return RedirectResponse(back.format("err=" + quote("priorità: da 1 a 5")), status_code=303)
+    new = {"active": form.get("active") == "1", "priority": priority,
+           "has_burned_captions": form.get("has_burned_captions") == "1"}
+    changed = {k: v for k, v in new.items()
+               if not (cur.get(k) == v or (k == "has_burned_captions" and not v and not cur.get(k))
+                       or (k == "priority" and settings_spec.same(cur.get(k), v)))}
+    if not changed:
+        return RedirectResponse(back.format("ok=" + quote(f"{source_key}: nessuna modifica")), status_code=303)
+    try:
+        await n8n.update_rows("sources", "source_key", source_key, changed)
+    except n8n.N8nError as e:
+        for k, v in changed.items():
+            audit.record(f"fonte {source_key} · {k}", cur.get(k), v, ip, False, str(e))
+        return RedirectResponse(back.format("err=" + quote(str(e))), status_code=303)
+    for k, v in changed.items():
+        audit.record(f"fonte {source_key} · {k}", cur.get(k), v, ip, True)
+    return RedirectResponse(back.format("ok=" + quote(f"{cur.get('name') or source_key}: salvato")), status_code=303)
+
+
+POST_ACTIONS = {
+    "primo": "Metti per primo in coda",
+    "scarta": "Scarta (non verrà pubblicato)",
+    "chiudi": "Chiudi riga bloccata",
+}
+
+
+@app.post("/contenuti/{post_key}/azione")
+async def post_action(request: Request, post_key: str):
+    form = await request.form()
+    action = str(form.get("azione", ""))
+    ip = request.client.host if request.client else "?"
+    back = f"/contenuti/{quote(post_key)}?{{}}"
+    if action not in POST_ACTIONS:
+        return RedirectResponse(back.format("err=" + quote("azione non valida")), status_code=303)
+    try:
+        rows = await n8n.table_rows("posts", ttl=0)
+    except n8n.N8nError as e:
+        return RedirectResponse(back.format("err=" + quote(str(e))), status_code=303)
+    now = datetime.now(timezone.utc)
+    cfg = logic.load_config(await n8n.table_rows("config", ttl=60))
+    posts = [logic.card(p, now, cfg) for p in rows if p.get("post_key")]
+    matches = [p for p in posts if p["post_key"] == post_key]
+    if len(matches) != 1:
+        return RedirectResponse(back.format("err=" + quote("Reel non trovato")), status_code=303)
+    p = matches[0]
+    stamp = f"{now.astimezone(logic.IT):%d/%m %H:%M}"
+    if action in ("primo", "scarta") and p["status"] != "READY":
+        return RedirectResponse(back.format("err=" + quote("possibile solo su un Reel pronto (READY)")), status_code=303)
+    if action == "primo":
+        if p["test"]:
+            return RedirectResponse(back.format("err=" + quote("è un Reel di prova: il Publisher non lo pubblica mai")), status_code=303)
+        best = max((x["score"] for x in posts if x["status"] == "READY" and not x["test"] and x["post_key"] != post_key),
+                   default=0)
+        # the Publisher always takes the highest trend_score among fresh READY Reels: one point above the best
+        data = {"trend_score": round(max(best + 1, p["score"]), 1),
+                "status_reason": f"messo per primo dal portale il {stamp} (score originale {p['score']})"}
+    elif action == "scarta":
+        data = {"status": "SKIPPED", "status_reason": f"scartato a mano dal portale il {stamp}"}
+    else:
+        if p["status"] not in logic.IN_PROGRESS or not logic.stuck(p, now):
+            return RedirectResponse(back.format("err=" + quote("possibile solo su una riga bloccata da più di 2 ore")), status_code=303)
+        data = {"status": "FAILED", "status_reason": f"riga bloccata chiusa a mano dal portale il {stamp}",
+                "error": f"rimasta in {p['status']} senza avanzare"}
+    try:
+        await n8n.update_rows("posts", "post_key", post_key, data)
+    except n8n.N8nError as e:
+        audit.record(f"reel {post_key} · {action}", p["status"], data.get("status") or data.get("trend_score"), ip, False, str(e))
+        return RedirectResponse(back.format("err=" + quote(str(e))), status_code=303)
+    audit.record(f"reel {post_key} · {action}", p["status"] if action != "primo" else p["score"],
+                 data.get("status") or data.get("trend_score"), ip, True)
+    return RedirectResponse(back.format("ok=" + quote(POST_ACTIONS[action] + ": fatto")), status_code=303)

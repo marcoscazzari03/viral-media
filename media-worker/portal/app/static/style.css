@@ -194,3 +194,13 @@ svg.chart2{width:100%;height:auto;display:block;margin-top:6px}
 .chartwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .cmp td:first-child{overflow-wrap:normal;word-break:normal}
 @media (max-width:640px){.chartwrap svg.chart2{min-width:560px}}
+.srcform{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.srcform .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.src td{vertical-align:middle}
+.actions-row{display:flex;gap:10px;flex-wrap:wrap}
+.actions-row form{margin:0}
+.actions-row button.primary{margin-top:0}
+button.danger{border-color:#5a2228;color:#ff8a8a}
+@media (max-width:760px){.src thead{display:none}.src tr{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;padding:8px 0;border-top:1px solid var(--line)}
+  .src td{border-top:0;padding:2px 0}.src td[colspan]{grid-column:1/-1}
+  .srcform .sr{position:static;width:auto;height:auto;clip:auto;font-size:13px;color:var(--muted)}}

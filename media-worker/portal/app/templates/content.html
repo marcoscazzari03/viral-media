@@ -2,6 +2,8 @@
 {% block title %}{{ p.creator_name }}{% endblock %}
 {% block body %}
 <p class="small"><a href="/contenuti">← Contenuti</a></p>
+{% if err %}<div class="banner err"><b>Non fatto.</b> {{ err }}</div>{% endif %}
+{% if ok %}<div class="banner ok">{{ ok }}.</div>{% endif %}
 <div class="detail">
   <div class="player card">
     {% if p.video_url and video_on_disk is not false %}
@@ -31,6 +33,21 @@
       {% for k, label in (('fb_error', 'Facebook'), ('yt_error', 'YouTube')) if p[k] %}
         <p class="small bad">{{ label }}: <span class="mono">{{ p[k] }}</span></p>{% endfor %}
     </section>
+
+    {% if can_first or can_skip or can_close %}
+    <section class="card">
+      <h2>Azioni</h2>
+      <div class="actions-row">
+        {% if can_first %}<form method="post" action="/contenuti/{{ p.post_key|urlencode }}/azione" data-confirm="Mettere questo Reel per primo in coda? Uscirà al prossimo slot libero (sempre nel limite di Reel al giorno).">
+          <input type="hidden" name="azione" value="primo"><button class="primary">Metti per primo in coda</button></form>{% endif %}
+        {% if can_skip %}<form method="post" action="/contenuti/{{ p.post_key|urlencode }}/azione" data-confirm="Scartare questo Reel? Non verrà pubblicato.">
+          <input type="hidden" name="azione" value="scarta"><button class="ghost danger">Scarta</button></form>{% endif %}
+        {% if can_close %}<form method="post" action="/contenuti/{{ p.post_key|urlencode }}/azione" data-confirm="Chiudere questa riga bloccata? Diventa FAILED e sparisce da Bloccati.">
+          <input type="hidden" name="azione" value="chiudi"><button class="ghost danger">Chiudi riga bloccata</button></form>{% endif %}
+      </div>
+      <p class="small muted">{% if can_first %}«Per primo» alza il punteggio del Reel sopra gli altri pronti: il Publisher lo sceglie al prossimo slot, rispettando limite giornaliero e distanza minima. {% endif %}Ogni azione finisce nello storico delle Impostazioni.</p>
+    </section>
+    {% endif %}
 
     <section class="card">
       <h2>Cronologia</h2>

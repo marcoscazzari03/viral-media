@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Fonti{% endblock %}
+{% block body %}
+{% if err %}<div class="banner err"><b>Non salvato.</b> {{ err }}</div>{% endif %}
+{% if ok %}<div class="banner ok">{{ ok }}. Il Discovery e la Factory usano i nuovi valori dal prossimo giro.</div>{% endif %}
+<p class="muted small">Gli streamer e i canali da cui il Discovery cerca le clip (tabella <span class="mono">viral_sources</span>).
+  La Factory monta solo clip da: <b>{{ factory_platforms }}</b>. <b>Priorità</b> 1–5: pesa il 10% del punteggio di ogni clip.
+  <b>Sottotitoli già impressi</b>: i nostri sottotitoli coprono solo l'intro, per non sovrapporsi ai loro.</p>
+
+<section class="card">
+  <table class="tbl small src">
+    <thead><tr><th>Fonte</th><th>Reel</th><th>Views medie</th><th>Ultimo Reel</th><th>Attiva</th><th>Priorità</th><th>Sottotitoli già impressi</th><th></th></tr></thead>
+    <tbody>
+    {% for s in sources %}
+      <tr id="s-{{ s.source_key }}" class="{{ 'dim' if not s.active }}">
+        <td><b>{{ s.name or s.handle or s.source_key }}</b><div class="muted">{{ s.platform }} · {{ s.handle or s.source_key }}</div></td>
+        <td>{{ s.pub }} pubbl.<div class="muted">{{ s.made }} prodotti</div></td>
+        <td>{{ s.avg|n }}</td>
+        <td>{{ s.last|ago if s.last else '—' }}</td>
+        <td colspan="4">
+          <form method="post" action="/fonti/{{ s.source_key }}" class="srcform">
+            <label class="switch"><input type="checkbox" name="active" value="1" {{ 'checked' if s.active }}> <span class="sr">Attiva</span></label>
+            <label class="switch"><span class="sr">Priorità</span><select name="priority" aria-label="Priorità">{% for v in range(1, 6) %}<option {{ 'selected' if (s.priority or 3)|int == v }}>{{ v }}</option>{% endfor %}</select></label>
+            <label class="switch"><input type="checkbox" name="has_burned_captions" value="1" {{ 'checked' if s.has_burned_captions }}> <span class="sr">Sottotitoli già impressi</span></label>
+            <button class="ghost">Salva</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="muted">Nessuna fonte.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
