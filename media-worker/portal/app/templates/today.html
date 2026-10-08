@@ -113,7 +113,8 @@
         <div class="small">Esecuzioni n8n questo mese (tutto l'account): <b>{{ month_execs }}</b> / {{ month_limit }}</div>
         <meter min="0" max="{{ month_limit }}" low="{{ month_limit * 0.7 }}" high="{{ month_limit * 0.9 }}" optimum="0" value="{{ month_execs }}"></meter>
       {% endif %}
-      <div class="small muted">Server video: {% if worker %}<span class="good">online</span> · coda {{ worker.queue }}{% else %}<span class="bad">non raggiungibile</span>{% endif %}</div>
+      <div class="small muted">Server video: {% if worker %}<span class="good">online</span> · coda {{ worker.queue }}{% else %}<span class="bad">non raggiungibile</span>{% endif %}
+        {% if disk %} · disco <span class="{{ 'bad' if disk.pct >= 80 else '' }}">{{ '%.0f'|format(disk.pct) }}%</span> ({{ disk.free|size }} liberi){% endif %}</div>
     </section>
   </div>
 </div>

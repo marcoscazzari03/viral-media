@@ -43,6 +43,8 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
   ad Analytics (04) e al report giornaliero (05).
 - [ ] Portale fase 2: pagine Contenuti (+ scheda Reel), Factory, Media, Workflow. Il portale legge anche la cartella
   dei media in sola lettura. Da verificare sul server dopo `update.sh`.
+- [ ] Disco: `update.sh` ora cancella le immagini Docker vecchie; avviso nel portale sopra l'80%. Conservazione dei
+  file portata a 14 giorni (`RETENTION_DAYS=14` nel `.env` del server); dopo qualche settimana valutare 30.
 - [x] Webcam non riconosciuta sul Reel Jynxzi "pigmen" (testa bassa / girato verso il monitor: il volto non si
   vede in 3 fotogrammi su 6). Aggiunto un secondo controllo: il riquadro della webcam trovato dai suoi bordi in un
   angolo, valido solo se dentro c'è un volto grande in almeno 2 fotogrammi. Il pannello webcam ora è tagliato

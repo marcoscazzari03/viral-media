@@ -19,6 +19,7 @@ app = FastAPI(title="US VIRAL portal", docs_url=None, redoc_url=None, openapi_ur
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 
+DISK_ALERT_PCT = 80
 CSP = ("default-src 'self'; img-src 'self' https: data:; media-src https:; style-src 'self'; script-src 'self'; "
        "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 
@@ -216,11 +217,18 @@ async def today(request: Request):
                   and p["published"] and (now - p["published"]).total_seconds() < 3 * 86400] if logic.num(cfg, "fb_enabled") else []
     wf_names = {i: w["name"] for i, w in d["wf"].items()}
     month_execs = d.get("month")
+    problems = logic.problems(now, cfg, posts, d["runs"], d["execs"], wf_names, scheduled)
+    disk = media.disk() if media.available() else None
+    if disk and disk["pct"] >= DISK_ALERT_PCT:  # a full disk stops renders and the public files
+        problems.insert(0, {"level": "err" if disk["pct"] >= 90 else "warn", "at": None,
+                            "title": f"Disco del server pieno al {disk['pct']:.0f}%",
+                            "detail": f"{size(disk['free'])} liberi: lancia update.sh (pulisce le immagini Docker vecchie) "
+                                      "o abbassa RETENTION_DAYS"})
     return page(request, "today.html", {
         **d, "published": published, "next": next_slot, "fb_waiting": fb_waiting,
         "next_fb": logic.next_fb_run(now),
         "perf": logic.performance(now, posts, d["snaps"], d["followers"]),
-        "problems": logic.problems(now, cfg, posts, d["runs"], d["execs"], wf_names, scheduled),
+        "problems": problems, "disk": disk,
         "cap": int(logic.num(cfg, "publish_max_per_day")), "month_execs": month_execs,
         "month_limit": config.N8N_MONTHLY_EXECUTIONS,
     })
