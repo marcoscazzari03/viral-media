@@ -180,11 +180,18 @@ def next_fb_run(now: datetime) -> datetime:
 
 
 # ------------------------------------------------------------------ Factory (02)
+def stuck(p: dict, now: datetime) -> bool:
+    upd = p.get("updated") or p.get("created")
+    return bool(upd) and (now - upd).total_seconds() > 2 * 3600
+
+
 def factory_state(now: datetime, cfg: dict, posts: list[dict], last_run: dict | None) -> dict:
     made_24h = [p for p in posts if p["created"] and (now - p["created"]).total_seconds() <= DAY
                 and not p["test"] and p["status"] != "FAILED"]
     ready = [p for p in posts if p["status"] == "READY" and not p["test"]]
-    working = [p for p in posts if p["status"] in IN_PROGRESS]
+    # a Factory / Publisher run lasts minutes: a Reel "in progress" untouched for 2 hours is a row left half-way
+    working = [p for p in posts if p["status"] in IN_PROGRESS and not stuck(p, now)]
+    stuck_rows = [p for p in posts if p["status"] in IN_PROGRESS and stuck(p, now)]
     cap, buf = int(num(cfg, "factory_max_reels_per_day")), int(num(cfg, "factory_ready_buffer_max"))
     if working:
         state, tone = f"Al lavoro: {len(working)} Reel in lavorazione", "ok"
@@ -197,7 +204,7 @@ def factory_state(now: datetime, cfg: dict, posts: list[dict], last_run: dict | 
     if cfg.get("factory_force_candidate_key"):
         state, tone = "Clip di prova forzata impostata (factory_force_candidate_key)", "warn"
     return {"state": state, "tone": tone, "made_24h": len(made_24h), "cap": cap, "ready": len(ready),
-            "buffer": buf, "working": working, "next_run": next_factory_run(now), "last_run": last_run}
+            "buffer": buf, "working": working, "stuck": stuck_rows, "next_run": next_factory_run(now), "last_run": last_run}
 
 
 # ------------------------------------------------------------------ Performance (same maths as the Daily Report)

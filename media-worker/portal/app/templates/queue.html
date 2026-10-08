@@ -43,6 +43,15 @@
       <p class="small"><span class="state {{ factory.tone }}">{{ factory.state }}</span></p>
     </section>
 
+    {% if factory.stuck %}
+    <section class="card">
+      <h2>Bloccati ({{ factory.stuck|length }})</h2>
+      <p class="muted small">Righe rimaste a metà (fermi da più di 2 ore): la Factory non le riprende e non bloccano nulla.
+        Si possono cancellare dalla tabella viral_posts.</p>
+      {% for p in factory.stuck %}{{ reel(p, p.status|lower ~ " · fermo da " ~ (p.updated|ago)|replace(' fa', '')) }}{% endfor %}
+    </section>
+    {% endif %}
+
     <section class="card">
       <h2>Scartati o falliti (48h)</h2>
       {% for p in recent %}
