@@ -148,3 +148,32 @@ async def executions_this_month(ttl: float = 600) -> int:
                              stop=lambda e: _ts(e.get("startedAt")) < start, max_pages=40)
         return len(items)
     return await cached("executions_month", ttl, load)
+
+
+# ------------------------------------------------------------------ writes (Settings page)
+async def set_config(key: str, column: str, value) -> dict:
+    """Writes one viral_config value (upsert on `key`: the row is created if missing). column is value_number or
+    value_string; the other one is set to null so the workflows read the right type. Returns the saved row."""
+    if column not in ("value_number", "value_string"):
+        raise N8nError(f"colonna non valida: {column}")
+    other = "value_string" if column == "value_number" else "value_number"
+    body = {"filter": {"type": "and", "filters": [{"columnName": "key", "condition": "eq", "value": key}]},
+            "data": {"key": key, column: value, other: None}, "returnData": True}
+    if not config.N8N_BASE_URL or not config.N8N_API_KEY:
+        raise N8nError("n8n non configurato (N8N_BASE_URL / N8N_API_KEY nel .env)")
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(f"{config.N8N_BASE_URL}/api/v1/data-tables/{config.TABLES['config']}/rows/upsert",
+                                  json=body, headers={"X-N8N-API-KEY": config.N8N_API_KEY, "Accept": "application/json"})
+    except httpx.HTTPError as e:
+        raise N8nError(f"n8n non raggiungibile: {type(e).__name__}") from e
+    if r.status_code == 403:
+        raise N8nError("la API key di n8n non ha il permesso di scrivere nelle Data Tables (403)")
+    if r.status_code >= 400:
+        raise N8nError(f"salvataggio di {key} non riuscito: HTTP {r.status_code} {r.text[:200]}")
+    rows, _ = _items(r.json() if r.content else [])
+    row = next((x for x in rows if isinstance(x, dict) and x.get("key") == key), None)
+    if row is None or row.get(column) != value:
+        raise N8nError(f"salvataggio di {key} non confermato da n8n: {r.text[:200]}")
+    _cache.pop("rows:config:None", None)
+    return row

@@ -4,6 +4,7 @@ volume (mounted read-only: job JSONs and files)."""
 import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 import jinja2
@@ -12,7 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, config, logic, media, n8n
+from . import audit, auth, config, logic, media, n8n, settings_spec
 
 BASE = Path(__file__).parent
 app = FastAPI(title="US VIRAL portal", docs_url=None, redoc_url=None, openapi_url=None)
@@ -413,3 +414,48 @@ async def workflow_page(request: Request):
         r["at"] = logic.parse(r.get("started_at"))
     return page(request, "workflow.html", {**d, "rows": rows, "month": month, "projection": projection,
                                            "limit": config.N8N_MONTHLY_EXECUTIONS, "errors_runs": errors_runs})
+
+
+# ------------------------------------------------------------------ phase 4: Settings (writes viral_config)
+@app.get("/impostazioni", response_class=HTMLResponse)
+async def settings_page(request: Request, ok: str = "", err: str = "", n: int = 0):
+    d = await load(need_perf=False)
+    cfg = d["cfg"]
+    present = {str(r.get("key")) for r in d["config"]}
+    values = {k: cfg.get(k, "") for k in settings_spec.FIELDS}
+    return page(request, "settings.html", {**d, "groups_spec": settings_spec.GROUPS, "values": values,
+                                           "present": present, "themes_spec": settings_spec.THEMES,
+                                           "ok": ok, "err": err, "n": n, "history": audit.latest(40)})
+
+
+@app.post("/impostazioni/{group}")
+async def settings_save(request: Request, group: str):
+    spec = next((g for g in settings_spec.GROUPS if g[0] == group), None)
+    if not spec:
+        return RedirectResponse("/impostazioni", status_code=303)
+    form = await request.form()
+    try:
+        current = logic.load_config(await n8n.table_rows("config", ttl=0))
+    except n8n.N8nError as e:
+        return RedirectResponse(f"/impostazioni?err={quote(str(e))}#{group}", status_code=303)
+    # validate the whole group first: nothing is saved if one field is wrong
+    try:
+        new = {f["key"]: settings_spec.parse(f, form) for f in spec[2]}
+    except settings_spec.Invalid as e:
+        return RedirectResponse(f"/impostazioni?err={quote(str(e))}#{group}", status_code=303)
+    ip = request.client.host if request.client else "?"
+    changed = 0
+    for key, value in new.items():
+        old = current.get(key)
+        if key in current and settings_spec.same(old, value):
+            continue
+        try:
+            await n8n.set_config(key, settings_spec.column(settings_spec.FIELDS[key]), value)
+        except n8n.N8nError as e:
+            audit.record(key, old, value, ip, False, str(e))
+            n8n.clear_cache()
+            return RedirectResponse(f"/impostazioni?err={quote(str(e))}&n={changed}#{group}", status_code=303)
+        audit.record(key, old, value, ip, True)
+        changed += 1
+    n8n.clear_cache()
+    return RedirectResponse(f"/impostazioni?ok={group}&n={changed}#{group}", status_code=303)

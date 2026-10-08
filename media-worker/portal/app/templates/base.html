@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>{% block title %}US VIRAL{% endblock %} · Control</title>
-<link rel="stylesheet" href="/static/style.css?v=3">
+<link rel="stylesheet" href="/static/style.css?v=4">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-<script src="/static/app.js?v=2" defer></script>
+<script src="/static/app.js?v=3" defer></script>
 </head>
 <body>
 {% if nav != "login.html" %}
@@ -21,7 +21,7 @@
     <a href="/media" class="{{ 'on' if nav == 'media.html' }}">Media</a>
     <a href="/workflow" class="{{ 'on' if nav == 'workflow.html' }}">Workflow</a>
     <span class="soon" title="Fase 3">Analytics</span>
-    <span class="soon" title="Fase 4">Impostazioni</span>
+    <a href="/impostazioni" class="{{ 'on' if nav == 'settings.html' }}">Impostazioni</a>
   </nav>
   <div class="actions">
     <span class="muted small" data-updated>aggiornato ora</span>

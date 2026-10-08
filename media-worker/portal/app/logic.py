@@ -12,6 +12,8 @@ DEFAULTS = {
     "publish_ready_max_age_h": 36, "publish_force_post_key": "",
     "factory_max_reels_per_day": 3, "factory_ready_buffer_max": 3, "factory_force_candidate_key": "",
     "factory_min_views": 250, "factory_creator_cooldown_h": 12, "factory_platforms": "twitch",
+    "factory_voice_ratio": 0.5, "factory_max_segment_s": 60, "yt_privacy": "private",
+    "fb_force_post_key": "", "yt_force_post_key": "",
     "factory_themes": "yellow,red,blue,green,purple", "factory_force_theme": "",
     "fb_enabled": 0, "yt_enabled": 0, "yt_max_per_day": 2, "llm_model": "",
 }

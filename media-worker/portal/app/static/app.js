@@ -19,7 +19,13 @@
     if (!b) return;
     navigator.clipboard?.writeText(b.dataset.copy).then(() => { b.textContent = 'copiato ✓'; setTimeout(() => b.textContent = 'copia URL video', 1500); });
   });
+  document.addEventListener('submit', e => {
+    const f = e.target.closest('form[data-confirm]');
+    if (f && !confirm(f.dataset.confirm)) e.preventDefault();
+  });
+  let dirty = false;  // no auto-refresh while a settings form has unsaved edits
+  document.addEventListener('input', e => { if (e.target.closest('.settings')) dirty = true; });
   setInterval(() => { tick(); upd(); }, 15000);
-  setInterval(() => { if (document.visibilityState === 'visible' && location.pathname !== '/login') location.reload(); }, 120000);
+  setInterval(() => { if (document.visibilityState === 'visible' && !dirty && !['/login', '/impostazioni'].includes(location.pathname)) location.reload(); }, 120000);
   tick();
 })();

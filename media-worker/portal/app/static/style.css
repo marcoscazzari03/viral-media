@@ -143,3 +143,25 @@ table.tbl{width:100%;border-collapse:collapse}
 .ex small{color:var(--muted);font-size:10px}
 .ex.error,.ex.crashed{background:#311519;color:var(--bad)}.ex.running,.ex.waiting{background:#2b2a14;color:#f5d742}
 @media (max-width:1000px){.list2{grid-template-columns:1fr}.detail{grid-template-columns:1fr}.player{position:static;max-width:340px;margin:0 auto}}
+
+/* settings */
+.banner.ok{background:#112418;border:1px solid #1f5a33}
+.settings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.settings .card{margin-bottom:0}
+.field{padding:10px 0;border-top:1px solid var(--line)}
+.field:first-of-type{border-top:0}
+.field label{margin:0 0 6px}
+.field input[type=number],.field select,.field input[type=text]{max-width:260px}
+.help{color:var(--muted);font-size:12.5px;margin-top:5px}
+.warn-t{color:var(--warn)}
+.switch{display:flex!important;gap:10px;align-items:center;cursor:pointer}
+.switch input{width:20px;height:20px;accent-color:var(--good)}
+.hours{display:flex;gap:6px;flex-wrap:wrap}
+.pill{margin:0!important;cursor:pointer}
+.pill input{position:absolute;opacity:0;width:1px;height:1px}
+.pill span{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;font-weight:600;font-size:14px}
+.pill input:checked+span{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.pill input:focus-visible+span{outline:2px solid var(--accent)}
+.sw{width:12px;height:12px;border-radius:50%;background:var(--c);display:inline-block}
+form button.primary{margin-top:12px}
+@media (max-width:1000px){.settings{grid-template-columns:minmax(0,1fr)}}

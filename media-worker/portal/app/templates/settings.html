@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Impostazioni{% endblock %}
+{% block body %}
+{% if err %}<div class="banner err"><b>Non salvato.</b> {{ err }}{% if n %} ({{ n }} valori salvati prima dell'errore){% endif %}</div>{% endif %}
+{% if ok %}<div class="banner ok">{{ 'Salvato: ' ~ n ~ (' valore aggiornato' if n == 1 else ' valori aggiornati') if n else 'Nessuna modifica da salvare' }}.
+  I workflow usano i nuovi valori dalla prossima esecuzione.</div>{% endif %}
+
+<p class="muted small">Questi valori vivono nella tabella <span class="mono">viral_config</span> di n8n: il portale li scrive lì e i
+  workflow li leggono a ogni esecuzione. Ogni modifica finisce nello storico in fondo alla pagina.</p>
+
+<div class="settings">
+{% for gid, title, fields in groups_spec %}
+  <section class="card" id="{{ gid }}">
+    <h2>{{ title }}</h2>
+    <form method="post" action="/impostazioni/{{ gid }}" {% if gid == 'pubblicazione' or gid == 'prove' %}data-confirm="Salvare le impostazioni «{{ title }}»? Valgono dalla prossima esecuzione dei workflow."{% endif %}>
+    {% for f in fields %}
+      {% set v = values[f.key] %}
+      <div class="field">
+        {% if f.kind == 'bool' %}
+          <label class="switch"><input type="checkbox" name="{{ f.key }}" value="1" {{ 'checked' if v|string not in ('', '0', '0.0') }}> {{ f.label }}</label>
+        {% else %}
+          <label for="f_{{ f.key }}">{{ f.label }}</label>
+          {% if f.kind == 'hours' %}
+            {% set on = (v|string).split(',')|map('trim')|list %}
+            <div class="hours">{% for h in f.choices %}
+              <label class="pill"><input type="checkbox" name="{{ f.key }}" value="{{ h }}" {{ 'checked' if h|string in on }}><span>{{ h }}:05</span></label>{% endfor %}</div>
+          {% elif f.kind == 'themes' %}
+            {% set on = (v|string).split(',')|map('trim')|list %}
+            <div class="hours">{% for name, hex, it in themes_spec %}
+              <label class="pill"><input type="checkbox" name="{{ f.key }}" value="{{ name }}" {{ 'checked' if name in on }}><span><i class="sw t-{{ name }}"></i>{{ it }}</span></label>{% endfor %}</div>
+          {% elif f.kind == 'choice' %}
+            <select id="f_{{ f.key }}" name="{{ f.key }}">{% for c in f.choices %}<option value="{{ c }}" {{ 'selected' if c == v|string }}>{{ c or '— nessuno —' }}</option>{% endfor %}</select>
+          {% elif f.kind in ('int', 'num') %}
+            <input id="f_{{ f.key }}" name="{{ f.key }}" type="number" inputmode="decimal" min="{{ f.min }}" max="{{ f.max }}" step="{{ f.step or 1 }}" value="{{ v }}">
+          {% else %}
+            <input id="f_{{ f.key }}" name="{{ f.key }}" type="text" value="{{ v }}" placeholder="vuoto" autocomplete="off">
+          {% endif %}
+        {% endif %}
+        {% if f.help %}<div class="help">{{ f.help }}</div>{% endif %}
+        {% if f.key not in present %}<div class="help warn-t">Non ancora presente in viral_config: il workflow usa il valore predefinito.</div>{% endif %}
+      </div>
+    {% endfor %}
+      <button class="primary">Salva</button>
+    </form>
+  </section>
+{% endfor %}
+</div>
+
+<section class="card">
+  <h2>Storico delle modifiche</h2>
+  {% if history %}
+  <table class="tbl small">
+    <thead><tr><th>Quando</th><th>Impostazione</th><th>Prima</th><th>Dopo</th><th></th></tr></thead>
+    <tbody>{% for h in history %}
+      <tr><td>{{ h.at|when }}</td><td class="mono">{{ h.key }}</td><td>{{ h.old or '—' }}</td><td><b>{{ h.new or '—' }}</b></td>
+        <td>{% if h.ok %}<span class="good">ok</span>{% else %}<span class="bad" title="{{ h.note }}">errore</span>{% endif %}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted small">Nessuna modifica fatta dal portale.</p>{% endif %}
+</section>
+{% endblock %}

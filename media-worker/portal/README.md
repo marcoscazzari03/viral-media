@@ -35,6 +35,15 @@ n8n REST API calls do not count as workflow executions. Answers are cached 45 s 
 - **Workflow**: each US VIRAL workflow with schedule, last executions (link to n8n), errors in 7 days, executions of
   the month and end-of-month projection against the plan limit, errors logged in `viral_runs`.
 
+## Settings (phase 4, writes)
+- **Impostazioni** edits the `viral_config` values the workflows read at every run: publishing (on/off, Reels per
+  day, slots limited to the hours the 03 trigger runs, minimum gap, STALE threshold), Factory caps, theme rotation
+  (at least 2) and forced theme, Facebook / YouTube switches, test keys.
+- Each group is validated as a whole before anything is written; writes use the Data Tables upsert endpoint on
+  `key` and are checked against the returned row. Every change (old -> new, IP, ok / error) is kept in SQLite on
+  the `portal_data` volume (the portal's only own data) and listed at the bottom of the page.
+- The API key needs permission to update Data Table rows.
+
 ## Security
 - One admin: scrypt password hash + TOTP (Google Authenticator), 5 wrong attempts per IP = 15 min block.
 - Signed session cookie (HttpOnly, Secure, SameSite=Strict, 14 days). A new password logs everyone out.

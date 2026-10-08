@@ -1,10 +1,11 @@
 # US VIRAL portal: private control panel (FastAPI + server-rendered pages). Reads n8n (Data Tables, executions)
-# through the n8n REST API and the media worker's health; no database of its own for the content.
+# through the n8n REST API and the media worker's volume; its only own data is the settings history (SQLite).
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /srv/portal
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && useradd --system --uid 10001 portal
+RUN pip install --no-cache-dir -r requirements.txt && useradd --system --uid 10001 portal \
+    && mkdir -p /srv/portal-data && chown portal /srv/portal-data
 COPY app ./app
 USER portal
 EXPOSE 8080
