@@ -19,3 +19,14 @@
 		reverse_proxy worker:8000
 	}
 }
+
+# Private control panel (login + 2FA inside the app). Needs a DNS A record PORTAL_DOMAIN -> this server.
+{$PORTAL_DOMAIN} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+	reverse_proxy portal:8080
+}

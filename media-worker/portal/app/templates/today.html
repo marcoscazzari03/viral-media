@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% from "_post.html" import reel %}
+{% block title %}Oggi{% endblock %}
+{% block body %}
+<div class="grid4">
+  <section class="card kpi">
+    <h3>Prossima uscita</h3>
+    {% if next %}
+      <div class="big" data-countdown="{{ iso(next.at) }}">{{ next.at|ago }}</div>
+      <div class="muted small">{{ next.at|when }} · Instagram{% if cfg.fb_enabled|int %}, poi Facebook{% endif %}</div>
+    {% else %}
+      <div class="big">—</div><div class="muted small">{{ plan[0].reason if plan else 'nessuno slot configurato' }}</div>
+    {% endif %}
+  </section>
+  <section class="card kpi">
+    <h3>Pubblicati oggi</h3>
+    <div class="big {{ 'good' if published|length >= cap else '' }}">{{ published|length }}/{{ cap }}</div>
+    <div class="muted small">giorno di New York · slot {{ cfg.publish_slots_et }}</div>
+  </section>
+  <section class="card kpi">
+    <h3>Factory</h3>
+    <div class="state {{ factory.tone }}">{{ factory.state }}</div>
+    <div class="muted small">{{ factory.made_24h }}/{{ factory.cap }} Reel in 24h · {{ factory.ready }} pronti · prossimo giro {{ factory.next_run|ago }}</div>
+  </section>
+  <section class="card kpi">
+    <h3>Problemi</h3>
+    {% set errs = problems|selectattr('level', 'equalto', 'err')|list %}
+    <div class="big {{ 'bad' if errs else 'good' }}">{{ errs|length }}</div>
+    <div class="muted small">{{ 'errori nelle ultime 24h' if errs else 'nessun errore nelle ultime 24h' }}{% if problems|length > errs|length %} · {{ problems|length - errs|length }} avvisi{% endif %}</div>
+  </section>
+</div>
+
+<div class="cols">
+  <div>
+    <section class="card">
+      <h2>Cosa verrà pubblicato</h2>
+      {% for e in plan[:4] %}
+        <div class="slot">
+          <div class="when"><b>{{ e.at|when }}</b><span class="muted small">{{ e.at|ago }}</span></div>
+          {% if e.post %}{{ reel(e.post, "pronto da " ~ (e.post.age_h|hours) ~ " · STALE tra " ~ (e.post.stale_in_h|hours)) }}
+          {% else %}<div class="muted skip">salta: {{ e.reason }}</div>{% endif %}
+        </div>
+      {% else %}
+        <p class="muted">Nessuno slot nei prossimi giorni.</p>
+      {% endfor %}
+      <p class="muted small">Previsione con le regole del Publisher: se la Factory prepara un Reel con punteggio più alto, prende il suo posto. <a href="/coda">Tutta la coda →</a></p>
+      {% if fb_waiting %}
+        <p class="small">Facebook: {{ fb_waiting|length }} Reel in attesa, prossimo giro del 07 {{ next_fb|when }}.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Pubblicati oggi</h2>
+      {% for p in published %}
+        {{ reel(p, "uscito " ~ (p.published|when)) }}
+      {% else %}
+        <p class="muted">Ancora nessun Reel oggi.</p>
+      {% endfor %}
+    </section>
+
+    {% if problems %}
+    <section class="card">
+      <h2>Problemi e avvisi</h2>
+      <ul class="issues">
+      {% for x in problems %}
+        <li class="{{ x.level }}"><b>{{ x.title }}</b>{% if x.at %} <span class="muted small">{{ x.at|ago }}</span>{% endif %}
+          {% if x.detail %}<div class="small muted mono">{{ x.detail }}</div>{% endif %}</li>
+      {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </div>
+
+  <div>
+    <section class="card">
+      <h2>Ultime 24 ore</h2>
+      <table class="perf">
+        <thead><tr><th></th><th>Views</th><th>Follower</th></tr></thead>
+        <tbody>
+        {% for r in perf.rows %}
+          <tr><td><span class="pdot {{ r.platform }}"></span>{{ r.label }}</td>
+            {% if r.views is none and r.followers is none %}<td colspan="2" class="muted small">{{ r.note }}</td>
+            {% else %}<td><b>{{ r.views|n }}</b></td>
+              <td>{{ r.followers|n }}{% if r.followers_delta is not none %} <span class="{{ 'good' if r.followers_delta > 0 else 'muted' }} small">{{ '%+d'|format(r.followers_delta) }}</span>{% endif %}</td>{% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+        <tfoot><tr><td>Totale</td><td colspan="2"><b>{{ perf.total|n }}</b>
+          {% if perf.pct is not none %}<span class="small {{ 'good' if perf.pct >= 0 else 'bad' }}"> {{ '%+d'|format(perf.pct) }}% vs ieri ({{ perf.total_y|n }})</span>{% endif %}</td></tr></tfoot>
+      </table>
+      <p class="small"><b>Guadagno</b> (ultimo giorno disponibile): Facebook {{ '$%.2f'|format(perf.earnings_fb) if perf.earnings_fb is not none else '—' }}
+        <span class="muted">· Instagram, YouTube e TikTok non monetizzati o senza API</span></p>
+    </section>
+
+    {% if perf.top %}
+    <section class="card">
+      <h2>Top contenuti 24h</h2>
+      {% for t in perf.top %}{{ reel(t.post, (t.views|n) ~ " views in 24h, tutti i social") }}{% endfor %}
+    </section>
+    {% endif %}
+
+    <section class="card">
+      <h2>Workflow n8n</h2>
+      <ul class="wf">
+      {% for id, w in wf.items() %}
+        {% set e = last_exec.get(id) %}
+        <li><span class="led {{ 'off' if not w.active else (e.status if e else 'none') }}"></span>
+          <span class="name">{{ w.name.split('|')[-1].strip() }}</span>
+          <span class="muted small">{% if not w.active %}disattivo{% elif e %}{{ {'success': 'ok', 'error': 'errore', 'crashed': 'crash', 'running': 'in corso', 'waiting': 'in attesa'}.get(e.status, e.status) }} · {{ e.started|ago }}{% elif 'Error' in w.name %}nessun errore da gestire in 48h{% else %}nessuna esecuzione in 48h{% endif %}</span></li>
+      {% endfor %}
+      </ul>
+      {% if month_execs is not none %}
+        <div class="small">Esecuzioni n8n questo mese (tutto l'account): <b>{{ month_execs }}</b> / {{ month_limit }}</div>
+        <meter min="0" max="{{ month_limit }}" low="{{ month_limit * 0.7 }}" high="{{ month_limit * 0.9 }}" optimum="0" value="{{ month_execs }}"></meter>
+      {% endif %}
+      <div class="small muted">Server video: {% if worker %}<span class="good">online</span> · coda {{ worker.queue }}{% else %}<span class="bad">non raggiungibile</span>{% endif %}</div>
+    </section>
+  </div>
+</div>
+{% endblock %}

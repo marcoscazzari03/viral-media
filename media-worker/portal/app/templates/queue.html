@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "_post.html" import reel %}
+{% block title %}Coda{% endblock %}
+{% block body %}
+<div class="cols">
+  <div>
+    <section class="card">
+      <h2>Prossimi slot</h2>
+      {% for e in plan %}
+        <div class="slot">
+          <div class="when"><b>{{ e.at|when }}</b><span class="muted small">{{ e.at|ago }}</span></div>
+          {% if e.post %}{{ reel(e.post, "STALE tra " ~ (e.post.stale_in_h|hours)) }}
+          {% else %}<div class="muted skip">salta: {{ e.reason }}</div>{% endif %}
+        </div>
+      {% endfor %}
+      <p class="muted small">Regole del Publisher: {{ cfg.publish_max_per_day|int }} al giorno negli slot {{ cfg.publish_slots_et }} (New York),
+        almeno {{ cfg.publish_min_gap_h }} ore tra due Reel, prima il punteggio più alto; dopo {{ cfg.publish_ready_max_age_h }} ore un Reel pronto diventa STALE.</p>
+    </section>
+
+    <section class="card">
+      <h2>Pronti ({{ ready|length }})</h2>
+      {% for p in ready %}
+        {% set at = slot_of.get(p.post_key) %}
+        {{ reel(p, ("esce " ~ (at|when)) if at else "nessuno slot prima che scada", ) }}
+        <div class="meta small muted">pronto da {{ p.age_h|hours }} · STALE tra {{ p.stale_in_h|hours }} ·
+          <a href="{{ p.video_url }}" target="_blank" rel="noopener">video</a> · <a href="{{ p.cover_url }}" target="_blank" rel="noopener">cover</a> ·
+          <a href="{{ p.source_url }}" target="_blank" rel="noopener">clip originale</a>
+          <button class="link" data-copy="{{ p.video_url }}">copia URL video</button></div>
+      {% else %}
+        <p class="muted">Nessun Reel pronto: la Factory ne prepara uno al prossimo giro.</p>
+      {% endfor %}
+    </section>
+  </div>
+
+  <div>
+    <section class="card">
+      <h2>In lavorazione</h2>
+      {% for p in factory.working %}
+        {{ reel(p, p.status|lower ~ " · aggiornato " ~ (p.updated|ago)) }}
+      {% else %}
+        <p class="muted">Niente in lavorazione. Prossimo giro della Factory {{ factory.next_run|when }}.</p>
+      {% endfor %}
+      <p class="small"><span class="state {{ factory.tone }}">{{ factory.state }}</span></p>
+    </section>
+
+    <section class="card">
+      <h2>Scartati o falliti (48h)</h2>
+      {% for p in recent %}
+        {{ reel(p, p.status ~ " · " ~ (p.updated|ago) ~ ((" · " ~ (p.error or p.status_reason or ''))|truncate(160))) }}
+      {% else %}
+        <p class="muted">Nessuno.</p>
+      {% endfor %}
+    </section>
+
+    {% if tests %}
+    <section class="card">
+      <h2>Reel di prova ({{ tests|length }})</h2>
+      <p class="muted small">Creati a mano con factory_force_candidate_key: non vengono mai pubblicati in automatico.</p>
+      {% for p in tests %}{{ reel(p, "creato " ~ (p.created|ago)) }}{% endfor %}
+    </section>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

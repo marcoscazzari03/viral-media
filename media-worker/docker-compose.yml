@@ -1,4 +1,5 @@
-# US VIRAL media worker: FastAPI job API (FFmpeg + faster-whisper + Piper TTS) behind Caddy (automatic HTTPS).
+# US VIRAL media worker: FastAPI job API (FFmpeg + faster-whisper + Piper TTS) behind Caddy (automatic HTTPS),
+# plus the private control panel (portal) on its own subdomain.
 services:
   worker:
     build: ./worker
@@ -12,16 +13,28 @@ services:
     expose:
       - "8000"
 
+  # Private control panel (dashboard): https://PORTAL_DOMAIN, login + 2FA. Reads n8n through its REST API.
+  portal:
+    build: ./portal
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      WORKER_URL: http://worker:8000
+    expose:
+      - "8080"
+
   caddy:
     image: caddy:2
     restart: unless-stopped
     depends_on:
       - worker
+      - portal
     ports:
       - "80:80"
       - "443:443"
     environment:
       DOMAIN: ${DOMAIN}
+      PORTAL_DOMAIN: ${PORTAL_DOMAIN:-dashboard.weborastudio.it}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./site:/srv/site:ro

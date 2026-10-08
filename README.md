@@ -67,6 +67,10 @@ the least used of the last 5 (`factory_themes`, `factory_force_theme` for tests)
 platforms, TikTok login and publishing page (`/panel`), legal pages (`/legal/`). Setup and update steps in
 [media-worker/README.md](media-worker/README.md).
 
+[`media-worker/portal/`](media-worker/portal/): private control panel (dashboard) on `dashboard.weborastudio.it`,
+login + 2FA, reads the n8n Data Tables and executions through the n8n REST API. Setup in
+[media-worker/portal/README.md](media-worker/portal/README.md).
+
 ## Platforms
 
 | Platform | How | Status |

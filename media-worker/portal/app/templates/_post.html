@@ -1,0 +1,18 @@
+{# one Reel as a compact row: cover, creator, headline, badges #}
+{% macro reel(p, extra="") %}
+<div class="reel">
+  <a class="cover" href="{{ p.video_url or '#' }}" target="_blank" rel="noopener">
+    {% if p.cover_url %}<img src="{{ p.cover_url }}" alt="" loading="lazy">{% elif p.thumbnail_url %}<img src="{{ p.thumbnail_url }}" alt="" loading="lazy">{% endif %}
+  </a>
+  <div class="info">
+    <div class="who"><b>{{ p.creator_name }}</b>
+      {% if p.theme %}<span class="theme t-{{ p.theme }}">{{ p.theme }}</span>{% endif %}
+      {% if p.voice %}<span class="tag">{{ p.voice }}</span>{% endif %}
+      {% if p.score %}<span class="tag" title="trend score">score {{ p.score }}</span>{% endif %}
+    </div>
+    {% if p.headline %}<div class="headline">“{{ p.headline }}”</div>{% endif %}
+    {% if extra %}<div class="small muted">{{ extra }}</div>{% endif %}
+    {% if p.links %}<div class="plats">{% for l in p.links %}<a class="plat {{ l.key }}" href="{{ l.url }}" target="_blank" rel="noopener">{{ l.label }}</a>{% endfor %}</div>{% endif %}
+  </div>
+</div>
+{% endmacro %}
