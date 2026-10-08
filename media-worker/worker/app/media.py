@@ -825,7 +825,7 @@ def detect_facecam(job_dir: Path, src: Path, sw: int, sh: int, duration: float) 
     # frontal (alt2) + profile (both directions): streamers turn to the monitor, lean in, move around
     frontal = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml")
     profile = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
-    grays, frames = [], []
+    grays, frames, loose = [], [], []
     for i, f in enumerate((0.1, 0.25, 0.4, 0.55, 0.7, 0.85)):
         shot = job_dir / f"facecam_{i}.jpg"
         run(["ffmpeg", "-y", "-v", "error", "-ss", f"{duration * f:.2f}", "-i", str(src), "-frames:v", "1",
@@ -841,9 +841,27 @@ def detect_facecam(job_dir: Path, src: Path, sw: int, sh: int, duration: float) 
                   (map(float, f) for f in profile.detectMultiScale(cv2.flip(img, 1), 1.1, 6, minSize=(size, size)))]
         grays.append(img)
         frames.append(found)
+        # looser pass, only to confirm a person inside a webcam box found by its borders (fallback below)
+        loose.extend((*map(float, f), i) for c in (frontal, profile)
+                     for f in c.detectMultiScale(img, 1.1, 3, minSize=(size, size)))
+        loose.extend((iw - x - w, y, w, h, i) for x, y, w, h in
+                     (map(float, f) for f in profile.detectMultiScale(cv2.flip(img, 1), 1.1, 3, minSize=(size, size))))
     if len(frames) < 3:
         return None
+    k = sw / grays[0].shape[1]
+    by_face = facecam_from_faces(grays, frames, cv2, np)
+    box = by_face or cam_box_from_borders(grays, loose, cv2, np)
+    if os.environ.get("FACECAM_DEBUG"):
+        print("facecam", "face" if by_face else "borders" if box else "none", box)
+    if not box:
+        return None
+    x0, y0, x1, y1, face_cx, face_cy = box
+    return {"x": int(x0 * k), "y": int(y0 * k), "w": even((x1 - x0) * k), "h": even((y1 - y0) * k),
+            "face_cx": face_cx * k, "face_cy": face_cy * k}
 
+
+def facecam_from_faces(grays: list, frames: list, cv2, np) -> tuple | None:
+    """Webcam box (analysis pixels: x0, y0, x1, y1, face centre x, y) around the same small face found in most frames."""
     radius = grays[0].shape[1] * 0.12 if grays else 0  # the streamer moves inside the webcam, the webcam stays put
 
     def near(a: tuple, b: tuple) -> bool:
@@ -883,13 +901,65 @@ def detect_facecam(job_dir: Path, src: Path, sw: int, sh: int, duration: float) 
     sides = sum((x0 > bx0 or x0 == 0, x1 < bx1 or x1 >= gw - 1, y0 > by0 or y0 == 0, y1 < by1 or y1 >= gh - 1))
     spread = max(np.std([f[0] + f[2] / 2 for f in best]), np.std([f[1] + f[3] / 2 for f in best])) / gw
     if os.environ.get("FACECAM_DEBUG"):
-        print("facecam", {"sides": sides, "spread": round(float(spread), 3), "face": (fx, fy, fw, fh), "n": len(best)})
+        print("faces", {"sides": sides, "spread": round(float(spread), 3), "face": (fx, fy, fw, fh), "n": len(best)})
     if sides < 2 or spread > 0.045:  # a webcam stays put (Jynxzi leaning in: 0.026), people in a scene move
         return None
-    k = sw / gw
-    return {"x": int(x0 * k), "y": int(y0 * k), "w": even((x1 - x0) * k), "h": even((y1 - y0) * k),
-            "face_cx": (fx + fw / 2) * k}
+    return x0, y0, x1, y1, fx + fw / 2, fy + fh / 2
 
+
+
+def cam_box_from_borders(grays: list, faces: list, cv2, np) -> tuple | None:
+    """Fallback when the streamer's face is hard to see (head down, turned to the monitor, hand on the face):
+    the webcam overlay found by its own borders. In the average of the frames the moving gameplay blurs out
+    while the overlay's edges stay sharp: a long horizontal border and a long vertical one meeting at a corner,
+    each running to the frame edges, so the box sits in a corner of the frame. A box only counts if a person is
+    in it (a big face, looser detection): HUD panels, minimaps, chat boxes and game scenes are skipped."""
+    gh, gw = grays[0].shape
+    mean = np.mean(np.stack(grays), axis=0).astype(np.uint8)
+    # border pixels, thickened by 1 px so a slightly slanted or anti-aliased border still reads as one line
+    kern = np.ones((3, 3), np.uint8)
+    hor = cv2.dilate((np.abs(cv2.Sobel(mean, cv2.CV_32F, 0, 1, ksize=3)) > 40).astype(np.uint8), kern)
+    ver = cv2.dilate((np.abs(cv2.Sobel(mean, cv2.CV_32F, 1, 0, ksize=3)) > 40).astype(np.uint8), kern)
+    boxes = []
+    for flip_x in (False, True):
+        for flip_y in (False, True):  # every corner, seen as the bottom-left one
+            h = hor[::-1] if flip_y else hor
+            v = ver[::-1] if flip_y else ver
+            h, v = (h[:, ::-1], v[:, ::-1]) if flip_x else (h, v)
+            hcum = np.cumsum(h, axis=1)  # hcum[r, c]: border pixels in row r up to column c
+            vcum = np.cumsum(v, axis=0)
+            cols = np.arange(int(gw * 0.12), int(gw * 0.45))
+            for r in range(int(gh * 0.3), int(gh * 0.85)):
+                bh = gh - r
+                # top border: row r from (near) the frame edge to column c; nothing past the corner
+                top = (hcum[r, cols] - hcum[r, (cols * 0.08).astype(int)]) / (cols * 0.92)
+                past = (hcum[r, np.minimum(cols + 30, gw - 1)] - hcum[r, np.minimum(cols + 4, gw - 1)]) / 26
+                # side border: column c from row r down to (near) the frame edge; nothing above the corner
+                side = (vcum[min(r + int(bh * 0.85), gh - 1), cols] - vcum[r, cols]) / (bh * 0.85)
+                above = (vcum[max(r - 4, 0), cols] - vcum[max(r - 30, 0), cols]) / 26
+                aspect = cols / bh
+                ok = (top > 0.8) & (side > 0.8) & (past < 0.5) & (above < 0.5) & (aspect > 0.75) & (aspect < 2.6)
+                for c in cols[ok]:
+                    c = int(c)
+                    boxes.append(((gw - c, gw) if flip_x else (0, c)) + ((0, bh) if flip_y else (r, gh)))
+    # the person in a webcam fills a good part of it: a face wholly inside, 15-70% of the box width, in 2+ of
+    # the frames (game characters or people in a scene are small next to a box that big). Most frames with
+    # such a face first, then the tightest box: the webcam's own borders, not a bigger panel around it
+    best = None
+    for x0, x1, y0, y1 in boxes:
+        bw, pad = x1 - x0, (x1 - x0) * 0.05
+        inside = [f for f in faces if x0 - pad <= f[0] and f[0] + f[2] <= x1 + pad and y0 - pad <= f[1]
+                  and f[1] + f[3] <= y1 + pad and 0.15 <= f[2] / bw <= 0.7]
+        score = (len({f[4] for f in inside}), -bw * (y1 - y0))
+        if score[0] >= 2 and (best is None or score > best[0]):
+            best = (score, (x0, y0, x1, y1), inside)
+    if os.environ.get("FACECAM_DEBUG"):
+        print("borders", {"candidates": len(boxes), "best": best and (best[1], [(int(f[2]), f[4]) for f in best[2]])})
+    if not best:
+        return None
+    (x0, y0, x1, y1), inside = best[1], best[2]
+    mid = lambda v: sorted(v)[len(v) // 2]  # noqa: E731 - median
+    return x0, y0, x1, y1, mid([f[0] + f[2] / 2 for f in inside]), mid([f[1] + f[3] / 2 for f in inside])
 
 SUBS_FPS, SUBS_W = 4, 960  # burned-in subtitle detection: samples per second and analysis width
 
@@ -1098,8 +1168,14 @@ def render_clip(job_dir: Path, params: dict, job_id: str) -> dict:
         gw = even(sw * GAME_H / sh)
         gx = 0 if cam["face_cx"] > sw / 2 else max(gw - W, 0)
         gy = CAM_TOP + CAM_H
+        # webcam panel: a box taller than the panel is cut around the face (face at 40% of the height,
+        # room for the headset on top), not in the middle, which cut the top of the head
+        cx, cy, cw, ch = cam["x"], cam["y"], cam["w"], cam["h"]
+        if ch > cw * CAM_H / W:
+            ch = even(cw * CAM_H / W)
+            cy = int(min(max(cam.get("face_cy", cy + cam["h"] / 2) - ch * 0.4, cam["y"]), cam["y"] + cam["h"] - ch))
         vf = (f"{src},split=3[a][b][c];" + bg +
-              f"[b]crop={cam['w']}:{cam['h']}:{cam['x']}:{cam['y']},"
+              f"[b]crop={cw}:{ch}:{cx}:{cy},"
               f"scale={W}:{CAM_H}:force_original_aspect_ratio=increase,crop={W}:{CAM_H},setsar=1[cam];"
               f"[c]scale={gw}:{GAME_H},crop={W}:{GAME_H}:{gx}:0,zoompan=z='{zoom}':d=1:x='iw/2-(iw/zoom/2)':"
               f"y='ih/2-(ih/zoom/2)':s={W}x{GAME_H}:fps={FPS},setsar=1[game];"

@@ -49,7 +49,9 @@ Exports keep credential names and ids only; the Telegram chat id is replaced by 
 
 Clip Reels (1080×1920): the clip in the centre over a blurred copy of itself, slow zoom + a punch zoom on the key
 moment, big word-by-word captions. Gaming / reaction clips with the streamer's webcam in a corner get a split layout instead: the server
-finds the webcam (OpenCV face detection, trimmed to the overlay's borders), shows it enlarged in a panel under the
+finds the webcam (OpenCV face detection, trimmed to the overlay's borders; when the face is hard to see, e.g. head
+down or turned to the monitor, the overlay box found by its own borders in a corner, with a big face in it), shows it
+enlarged in a panel under the
 texts and the gameplay below it, with a yellow line between (`layout` render param: auto / split / center). Above the clip, the "pop" meme line for the whole Reel: Montserrat Black,
 tilted, key word in yellow, yellow swoosh and sparks, then the page handle and the streamer credit. The AI
 voice-over plays on about half of the Reels (A/B test, `style_variant`). Each Reel gets a designed Instagram cover

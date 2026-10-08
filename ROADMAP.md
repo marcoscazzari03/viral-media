@@ -33,6 +33,13 @@ Promemoria delle decisioni prese. Niente segreti in questo file (repo pubblico).
 - [ ] Workflow n8n per pubblicare su TikTok in automatico (stesso endpoint `/tiktok/post`).
 - [ ] Rigenerare `API_TOKEN` del server e secret TikTok Sandbox (sono passati in chat).
 
+## Da fare (8 ottobre)
+- [x] Webcam non riconosciuta sul Reel Jynxzi "pigmen" (testa bassa / girato verso il monitor: il volto non si
+  vede in 3 fotogrammi su 6). Aggiunto un secondo controllo: il riquadro della webcam trovato dai suoi bordi in un
+  angolo, valido solo se dentro c'è un volto grande in almeno 2 fotogrammi. Il pannello webcam ora è tagliato
+  attorno al volto (prima al centro: testa tagliata). Testato su 12 clip (webcam, senza webcam, IRL). Da fare:
+  aggiornare il server e controllare il layout dei prossimi Reel con webcam.
+
 ## Da fare (7 ottobre)
 - [x] Mattina: svuotato `publish_force_post_key`; rimessi `factory_max_reels_per_day` = 3 e `publish_max_per_day` = 2.
 - [x] Titolo spostato sotto la fascia alta di Instagram; layout webcam solo con webcam vera (falso positivo su Lacy IRL,
