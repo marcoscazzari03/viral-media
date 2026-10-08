@@ -505,6 +505,7 @@ async def analytics(request: Request, giorni: int = 14):
         "top": sorted(window, key=lambda p: -p["views"])[:10],
         "costs": logic.llm_costs(made), "month_execs": month_execs, "month_limit": config.N8N_MONTHLY_EXECUTIONS,
         "fixed": config.fixed_costs(), "track_days": logic.num(d["cfg"], "analytics_track_days") or 7,
+        "earn": logic.earnings(foll, start),
     })
 
 

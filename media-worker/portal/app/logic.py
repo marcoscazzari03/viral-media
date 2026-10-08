@@ -466,3 +466,18 @@ def llm_costs(posts: list[dict]) -> dict:
     calls = sum(g["calls"] for g in by_model.values())
     return {"models": sorted(by_model.values(), key=lambda g: -g["tokens"]), "lo": lo, "hi": hi, "calls": calls,
             "per_reel": ((lo / calls, hi / calls) if calls else None)}
+
+
+def earnings(rows: list[dict], start: datetime) -> dict:
+    """Facebook earnings read by the Analytics (04): each run stores the latest day Facebook reports (1-2 days
+    late, the day itself is not stored), so one value per day of reading is kept: the last one of that day."""
+    reads = sorted((parse(r.get("captured_at")), float(r["earnings_usd"])) for r in rows
+                   if (r.get("platform") or "") == "facebook" and r.get("earnings_usd") not in (None, "")
+                   and parse(r.get("captured_at")))
+    per_day: dict[str, tuple[datetime, float]] = {}
+    for t, v in reads:
+        per_day[ny_day(t)] = (t, v)
+    days = [{"day": k, "at": t, "usd": v} for k, (t, v) in sorted(per_day.items()) if t >= start]
+    latest = reads[-1] if reads else None
+    return {"latest": latest[1] if latest else None, "latest_at": latest[0] if latest else None,
+            "days": days, "total": sum(d["usd"] for d in days)}

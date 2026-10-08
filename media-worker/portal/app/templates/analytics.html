@@ -91,6 +91,32 @@
   </table>
 </section>
 
+<section class="card" id="guadagni">
+  <h2>Guadagni</h2>
+  <table class="tbl small">
+    <thead><tr><th>Social</th><th>Ultimo giorno disponibile</th><th>Nel periodo</th><th></th></tr></thead>
+    <tbody>
+      <tr><td><span class="pdot facebook"></span>Facebook</td>
+        <td><b>{{ '$%.2f'|format(earn.latest) if earn.latest is not none else '—' }}</b></td>
+        <td><b>${{ '%.2f'|format(earn.total) }}</b></td>
+        <td class="muted">{% if earn.latest_at %}letto {{ earn.latest_at|ago }}{% else %}nessuna lettura ancora{% endif %}</td></tr>
+      <tr><td><span class="pdot instagram"></span>Instagram</td><td>—</td><td>—</td><td class="muted">nessun guadagno diretto né API dei ricavi</td></tr>
+      <tr><td><span class="pdot youtube"></span>YouTube</td><td>—</td><td>—</td><td class="muted">non ancora monetizzato</td></tr>
+      <tr><td><span class="pdot tiktok"></span>TikTok</td><td>—</td><td>—</td><td class="muted">API in attesa di approvazione; Creator Rewards non disponibile in Italia</td></tr>
+    </tbody>
+    <tfoot><tr><td>Totale</td><td><b>{{ '$%.2f'|format(earn.latest or 0) }}</b></td><td><b>${{ '%.2f'|format(earn.total) }}</b></td><td></td></tr></tfoot>
+  </table>
+  {% if earn.days %}
+  <details><summary class="small">Valori letti giorno per giorno</summary>
+    <table class="tbl small"><thead><tr><th>Letto il</th><th>Facebook</th></tr></thead>
+      <tbody>{% for x in earn.days|reverse %}<tr><td>{{ x.at|when }}</td><td>${{ '%.2f'|format(x.usd) }}</td></tr>{% endfor %}</tbody></table>
+  </details>
+  {% endif %}
+  <p class="small muted">Valori reali letti da Facebook (mai stime da views × RPM). Facebook li comunica con 1-2 giorni di ritardo e
+    l'Analytics salva solo l'ultimo giorno disponibile senza la sua data: il totale del periodo somma un valore per ogni giorno di lettura,
+    quindi può spostarsi di un giorno.</p>
+</section>
+
 <section class="card" id="costi">
   <h2>Costi</h2>
   <div class="grid4 inner">
